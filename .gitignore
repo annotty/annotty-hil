@@ -32,3 +32,31 @@ Package.resolved
 # Temporary files
 *.swp
 *~
+
+# === Server (Python) ===
+
+# Patient image data (never commit)
+server/data/
+server/logs/
+
+# Python
+*.pyc
+*.pyo
+__pycache__/
+
+# Models (generated locally)
+server/models/
+
+# Environment
+server/.env
+server/venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Windows
+Thumbs.db
+
+# Cloudflare
+cloudflared.exe
