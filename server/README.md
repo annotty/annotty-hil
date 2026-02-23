@@ -1,68 +1,88 @@
 # Retinal HIL Server
 
-眼底血管セグメンテーションのための Human-In-the-Loop (HIL) アノテーションシステム。
-iPad アプリ (Annotty) からアノテーション → サーバーで再学習 → モデル配信の HIL ループを実現する。
+FastAPI server for Human-in-the-Loop (HIL) active learning. Works with the Annotty HIL iPad app to enable an iterative annotation → training → model delivery cycle for retinal vessel segmentation.
 
-## システム概要
+## System Overview
 
 ```
-iPad (Annotty)                    Server (このディレクトリ)
+iPad (Annotty HIL)                Server (this directory)
   |                                 |
-  |-- GET /images ---------------->| 未アノテーション画像一覧
-  |-- GET /images/{id}/download -->| 画像ダウンロード
-  |-- POST /infer/{id} ---------->| 推論（5-fold アンサンブル）
-  |-- PUT /submit/{id} ---------->| アノテーション保存
-  |-- POST /train --------------->| バックグラウンド学習開始
-  |-- GET /status --------------->| 学習進捗ポーリング
-  |-- GET /models/latest -------->| CoreML モデルダウンロード
+  |-- GET /images ---------------->| List unannotated images
+  |-- GET /images/{id}/download -->| Download image
+  |-- PUT /submit/{id} ---------->| Save annotation mask
+  |-- POST /train --------------->| Start background training
+  |-- POST /train/cancel -------->| Cancel training
+  |-- GET /status --------------->| Poll training progress
+  |-- GET /models/latest -------->| Download CoreML model
 ```
 
-## セットアップ
+> **Note:** Inference (`POST /infer/{id}`) is available on the server but the iPad app uses on-device CoreML inference by default for faster predictions.
+
+## Setup
+
+### Requirements
+
+- Python 3.10+
+- NVIDIA GPU with CUDA (for training)
+- [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/) (`cloudflared`)
+
+### Installation
 
 ```bash
 cd server/
-
-# 依存パッケージのインストール
 pip install -r requirements.txt
+```
 
-# サーバー起動 (http://0.0.0.0:8000)
+### Start Server
+
+```bash
+# Start server + Cloudflare quick tunnel
 python main.py
 ```
 
-Tailscale 経由で iPad からアクセスする場合は、Tailscale の IP アドレスを使用する。
+This will:
+1. Start the FastAPI server on `http://0.0.0.0:8000`
+2. Launch a Cloudflare quick tunnel
+3. Print the public `https://xxxx.trycloudflare.com` URL — enter this in the iPad app
 
-## ディレクトリ構成
+#### Local network only (no tunnel)
+
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+## Directory Structure
 
 ```
 server/
-├── main.py                # FastAPI サーバー（エントリーポイント）
-├── config.py              # パス・ハイパーパラメータ一元管理
-├── model.py               # U-Net モデル定義 (smp + ResNet34)
-├── data_manager.py        # データアクセス層
-├── trainer.py             # 5-fold CV 学習ワーカー
-├── inference.py           # 5-fold アンサンブル推論
-├── convert_coreml.py      # PyTorch → CoreML 変換
-├── version_manager.py     # モデルバージョン管理
-├── requirements.txt       # 依存パッケージ
+├── main.py                # FastAPI server (entry point)
+├── config.py              # Paths & hyperparameters
+├── model.py               # U-Net model definition (smp + ResNet34)
+├── data_manager.py        # Data access layer
+├── trainer.py             # 5-fold CV training worker
+├── inference.py           # 5-fold ensemble inference
+├── convert_coreml.py      # PyTorch → CoreML conversion
+├── version_manager.py     # Model version management
+├── requirements.txt       # Dependencies
 ├── scripts/
-│   ├── import_images.py       # 画像インポートスクリプト
-│   ├── generate_dummy_data.py # テスト用ダミーデータ生成
-│   ├── migrate_data.py        # データ移行スクリプト
-│   └── test_api.py            # API テストスクリプト
-└── data/
-    ├── images_completed/      # アノテーション完了済み（read-only）
+│   ├── import_images.py       # Image import script
+│   ├── generate_dummy_data.py # Generate dummy test data
+│   ├── migrate_data.py        # Data migration script
+│   └── test_api.py            # API test script
+└── data/                      # ⚠️ Not tracked in git
+    ├── images_completed/      # Annotated data (read-only)
     │   ├── images/
     │   └── annotations/
-    ├── images_unannotated/    # アノテーション対象（iPad から書き込み）
+    ├── images_unannotated/    # Images for annotation (iPad writes here)
     │   ├── images/
     │   └── annotations/
     └── models/
         ├── pytorch/
-        │   ├── pretrained.pt  # 事前学習モデル
-        │   ├── current_pt/    # 推論で使うモデル一式
-        │   │   ├── fold_0..4.pt  # 5-fold モデル（アンサンブル推論用）
-        │   │   └── best.pt       # ベスト fold（CoreML 変換・フォールバック用）
-        │   └── versions/      # バージョン管理
+        │   ├── pretrained.pt      # Pre-trained model
+        │   ├── current_pt/        # Active model for inference
+        │   │   ├── fold_0..4.pt   # 5-fold models (ensemble)
+        │   │   └── best.pt        # Best fold (CoreML conversion)
+        │   └── versions/          # Version archive
         │       ├── v001/
         │       ├── v002/
         │       └── ...
@@ -70,91 +90,90 @@ server/
             └── SegmentationModel.mlpackage
 ```
 
-### データ分離設計
+### Data Separation Design
 
-| ディレクトリ | 用途 | 書き込み |
+| Directory | Purpose | Write Access |
 |---|---|---|
-| `images_completed/` | アノテーション完了済みデータ。学習に使用 | read-only |
-| `images_unannotated/` | iPad からアノテーション対象の画像群 | iPad が `PUT /submit` で書き込み |
+| `images_completed/` | Completed annotations. Used for training. | Read-only |
+| `images_unannotated/` | Images for iPad annotation | iPad writes via `PUT /submit` |
 
-サーバーコードは `images_completed/` に一切書き込まないため、完了済みアノテーションの事故上書きを防止する。
+The server never writes to `images_completed/`, preventing accidental overwrites of completed annotations.
 
-## API エンドポイント一覧
+## API Endpoints
 
-### 画像・アノテーション
+### Images & Annotations
 
-| Method | Path | 説明 |
-|--------|------|------|
-| `GET` | `/info` | サーバー情報（画像数・ラベル数・学習状態） |
-| `GET` | `/images` | 未アノテーション画像の一覧 |
-| `GET` | `/images/{image_id}/download` | 画像ダウンロード |
-| `GET` | `/labels/{image_id}/download` | アノテーションマスクダウンロード |
-| `GET` | `/next?strategy=random` | 次の未ラベル画像 ID を返す |
-| `POST` | `/infer/{image_id}` | 推論実行（赤色マスク PNG を返す） |
-| `PUT` | `/submit/{image_id}` | アノテーションマスクアップロード |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/info` | Server info (image count, label count, training status) |
+| `GET` | `/images` | List unannotated images |
+| `GET` | `/images/{image_id}/download` | Download image |
+| `GET` | `/labels/{image_id}/download` | Download annotation mask |
+| `GET` | `/next?strategy=random` | Get next unlabeled image ID |
+| `POST` | `/infer/{image_id}` | Run inference (returns red mask PNG) |
+| `PUT` | `/submit/{image_id}` | Upload annotation mask |
 
-### 学習
+### Training
 
-| Method | Path | 説明 |
-|--------|------|------|
-| `POST` | `/train?max_epochs=50` | バックグラウンド学習開始（5-fold CV） |
-| `POST` | `/train/cancel` | 学習キャンセル |
-| `GET` | `/status` | 学習ステータス（epoch, dice, fold, version） |
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/train?max_epochs=50` | Start background training (5-fold CV) |
+| `POST` | `/train/cancel` | Cancel training |
+| `GET` | `/status` | Training status (epoch, dice, fold, version) |
 
-### モデル管理
+### Model Management
 
-| Method | Path | 説明 |
-|--------|------|------|
-| `GET` | `/models/latest` | CoreML モデルダウンロード (ZIP) |
-| `POST` | `/models/convert` | PyTorch → CoreML 変換実行 |
-| `GET` | `/models/versions` | 全バージョンのサマリーリスト |
-| `POST` | `/models/versions/{version}/restore` | 指定バージョンに復元（ロールバック） |
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/models/latest` | Download CoreML model (ZIP) |
+| `POST` | `/models/convert` | Run PyTorch → CoreML conversion |
+| `GET` | `/models/versions` | List all version summaries |
+| `POST` | `/models/versions/{version}/restore` | Restore a specific version (rollback) |
 
-## モデルバージョン管理
+## Model Version Management
 
-### 概要
+### Overview
 
-学習を実行するたびに `versions/v{NNN}/` にモデルファイルと学習記録が自動保存される。
-推論に使われるのは常に `current_pt/` 内のモデルであり、バージョンディレクトリはアーカイブ。
+Each training run automatically saves model files and training logs to `versions/v{NNN}/`. Inference always uses the models in `current_pt/`. Version directories serve as archives.
 
-### 学習時の自動バージョニング
+### Training Auto-Versioning Flow
 
-1. `POST /train` → 学習開始時に `get_next_version()` で次のバージョン番号を決定
-2. 各 epoch で `train_loss` と `val_dice` を記録
-3. 学習完了後に `current_pt/` のモデルをバージョンディレクトリにコピー
-4. `training_log.json` を書き出し
-5. キャンセル・エラー時も部分バージョンを保存（status: `"cancelled"` / `"error"`）
+1. `POST /train` → `get_next_version()` determines the next version number
+2. Each epoch records `train_loss` and `val_dice`
+3. After training, models from `current_pt/` are copied to the version directory
+4. `training_log.json` is written
+5. On cancel/error, a partial version is saved (status: `"cancelled"` / `"error"`)
 
-### バージョン一覧の確認
+### List Versions
 
 ```bash
 curl http://localhost:8000/models/versions
 ```
 
-### ロールバック（過去バージョンへの復元）
+### Rollback to a Previous Version
 
 ```bash
 curl -X POST http://localhost:8000/models/versions/v001/restore
 ```
 
-## モデルアーキテクチャ
+## Model Architecture
 
-- **ベースモデル**: U-Net (segmentation_models_pytorch)
-- **エンコーダ**: ResNet34 (ImageNet pretrained)
-- **入力**: 512x512 RGB
-- **出力**: 512x512 1ch (血管セグメンテーションマスク)
-- **損失関数**: DiceBCELoss (Dice Loss + Binary Cross Entropy)
-- **学習**: 5-fold Cross Validation, AdamW + CosineAnnealing
-- **推論**: 5-fold アンサンブル（各 fold の予測を平均）
+- **Base model**: U-Net ([segmentation_models_pytorch](https://github.com/qubvel/segmentation_models.pytorch))
+- **Encoder**: ResNet34 (ImageNet pre-trained)
+- **Input**: 512x512 RGB
+- **Output**: 512x512 1ch (vessel segmentation mask)
+- **Loss**: DiceBCELoss (Dice Loss + Binary Cross Entropy)
+- **Training**: 5-fold Cross Validation, AdamW + CosineAnnealing
+- **Inference**: 5-fold ensemble (average predictions across folds)
 
-## 主要パラメータ (config.py)
+## Key Parameters (config.py)
 
-| パラメータ | デフォルト値 | 説明 |
+| Parameter | Default | Description |
 |---|---|---|
-| `IMAGE_SIZE` | 512 | 入力画像サイズ |
-| `BATCH_SIZE` | 4 | バッチサイズ |
-| `DEFAULT_MAX_EPOCHS` | 50 | fold あたりの最大エポック数 |
-| `LEARNING_RATE` | 1e-4 | 学習率 |
-| `WEIGHT_DECAY` | 1e-5 | L2 正則化 |
-| `N_FOLDS` | 5 | Cross Validation の fold 数 |
-| `MIN_IMAGES_FOR_TRAINING` | 2 | 学習に必要な最低画像枚数 |
+| `IMAGE_SIZE` | 512 | Input image size |
+| `BATCH_SIZE` | 4 | Training batch size |
+| `DEFAULT_MAX_EPOCHS` | 50 | Max epochs per fold |
+| `LEARNING_RATE` | 1e-4 | Learning rate |
+| `WEIGHT_DECAY` | 1e-5 | L2 regularization |
+| `N_FOLDS` | 5 | Number of cross-validation folds |
+| `MIN_IMAGES_FOR_TRAINING` | 2 | Minimum images required to start training |
