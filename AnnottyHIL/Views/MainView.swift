@@ -42,7 +42,6 @@ struct MainView: View {
                 onUndo: { viewModel.undo() },
                 onRedo: { viewModel.redo() },
                 onDelete: { viewModel.deleteCurrentImage() },
-                showDeleteButton: viewModel.showDeleteButton,
                 canUndo: viewModel.canUndo,
                 canRedo: viewModel.canRedo
             )
@@ -61,7 +60,7 @@ struct MainView: View {
                 // Center - Canvas
                 CanvasContainerView(viewModel: viewModel)
 
-                // Right panel - Color, settings button, U-Net, HIL
+                // Right panel - Color, settings button, HIL
                 RightPanelView(
                     annotationColor: $viewModel.annotationColor,
                     isFillMode: $viewModel.isFillMode,
@@ -75,18 +74,16 @@ struct MainView: View {
                             showingImageSettings = true
                         }
                     },
-                    onUNetTapped: {
-                        viewModel.runUNetPrediction()
-                    },
                     isHILEnabled: hilSettings.isConfigured,
                     isHILSubmitting: hilViewModel.isHILSubmitting,
+                    localImageCount: viewModel.totalImageCount,
                     trainingStatus: hilViewModel.trainingStatus,
                     serverInfo: hilViewModel.serverInfo,
                     onServerPredictTapped: {
                         viewModel.runUNetPrediction()
                     },
-                    onSubmitNextTapped: {
-                        Task { await hilViewModel.submitAndNext(canvasVM: viewModel) }
+                    onSubmitTapped: {
+                        Task { await hilViewModel.submitAndDelete(canvasVM: viewModel) }
                     },
                     onTrainTapped: {
                         Task { await hilViewModel.startTraining() }
@@ -125,7 +122,6 @@ struct MainView: View {
                     maskEdgeAlpha: $viewModel.maskEdgeAlpha,
                     smoothKernelSize: $viewModel.smoothKernelSize,
                     classNames: $viewModel.classNames,
-                    showDeleteButton: $viewModel.showDeleteButton,
                     onClearClassNames: { viewModel.clearClassNames() },
                     onDeleteAllFiles: { viewModel.deleteAllFiles() }
                 )
@@ -184,10 +180,9 @@ struct MainView: View {
             HILDashboardView(
                 hilViewModel: hilViewModel,
                 settings: hilSettings,
-                onImageSelected: { imageId in
-                    showingDashboard = false
+                onImportSelected: { imageIds in
                     Task {
-                        await hilViewModel.loadImageIntoCanvas(imageId: imageId, canvasVM: viewModel)
+                        await hilViewModel.importImages(imageIds: imageIds, canvasVM: viewModel)
                     }
                 }
             )

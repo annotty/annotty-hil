@@ -2,6 +2,26 @@ import SwiftUI
 import Combine
 import simd
 
+nonisolated(unsafe) private let classRGBColors: [(UInt8, UInt8, UInt8)] = [
+    (255, 0, 0),       // 1: red
+    (255, 128, 0),     // 2: orange
+    (255, 255, 0),     // 3: yellow
+    (0, 255, 0),       // 4: green
+    (0, 255, 255),     // 5: cyan
+    (0, 0, 255),       // 6: blue
+    (128, 0, 255),     // 7: purple
+    (255, 102, 178)    // 8: pink
+]
+
+nonisolated(unsafe) private let exactColorLookup: [UInt32: UInt8] = {
+    var table = [UInt32: UInt8]()
+    for (index, (r, g, b)) in classRGBColors.enumerated() {
+        let key = UInt32(r) << 16 | UInt32(g) << 8 | UInt32(b)
+        table[key] = UInt8(index + 1)
+    }
+    return table
+}()
+
 /// Main state coordinator for the canvas
 /// Manages drawing state, image navigation, and coordinates with Metal renderer
 class CanvasViewModel: ObservableObject {
@@ -90,17 +110,7 @@ class CanvasViewModel: ObservableObject {
     /// UserDefaults key for last viewed image
     private static let lastImageNameKey = "annotty.lastImageName"
 
-    /// UserDefaults key for showing delete button
-    private static let showDeleteButtonKey = "annotty.showDeleteButton"
-
     // MARK: - UI Preferences
-
-    /// Whether to show the Delete button in the top bar (default: hidden)
-    @Published var showDeleteButton: Bool = false {
-        didSet {
-            UserDefaults.standard.set(showDeleteButton, forKey: Self.showDeleteButtonKey)
-        }
-    }
 
     // MARK: - Display Settings
 
@@ -150,6 +160,11 @@ class CanvasViewModel: ObservableObject {
 
     @Published private(set) var currentImageIndex: Int = 0
     @Published private(set) var totalImageCount: Int = 0
+
+    /// Filename of the currently displayed image (e.g. "image001.png"), nil if no image loaded
+    var currentImageFileName: String? {
+        imageManager.currentItem?.url.lastPathComponent
+    }
 
     // MARK: - Loading/Saving State
 
@@ -216,7 +231,6 @@ class CanvasViewModel: ObservableObject {
         setupBindings()
         setupGestureCallbacks()
         loadClassNames()
-        loadUIPreferences()
         initializeProjectFolder()
         observeImportNotification()
     }
@@ -292,12 +306,26 @@ class CanvasViewModel: ObservableObject {
         }
     }
 
+    /// Navigate to an existing image by filename. Returns true if found.
+    func navigateToImage(named filename: String) -> Bool {
+        if let index = imageManager.items.firstIndex(where: { $0.url.lastPathComponent == filename }) {
+            imageManager.goTo(index: index)
+            loadCurrentImage()
+            return true
+        }
+        return false
+    }
+
     /// Import a single image to the project
     func importImage(from sourceURL: URL) {
         do {
             let destinationURL = try ProjectFileService.shared.copyImageToProject(sourceURL)
             print("[Import] Copied: \(destinationURL.lastPathComponent)")
-            reloadImagesFromProject()
+
+            // Refresh image list without loading any image (avoids
+            // reloadImagesFromProject restoring the previous lastImageName)
+            let imageURLs = ProjectFileService.shared.getImageURLs()
+            imageManager.setImages(imageURLs)
 
             if let index = imageManager.items.firstIndex(where: { $0.url == destinationURL }) {
                 imageManager.goTo(index: index)
@@ -1296,28 +1324,6 @@ class CanvasViewModel: ObservableObject {
         }
     }
 
-    /// Class colors as RGB tuples (index+1 = classID)
-    private static let classRGBColors: [(UInt8, UInt8, UInt8)] = [
-        (255, 0, 0),       // 1: red
-        (255, 128, 0),     // 2: orange
-        (255, 255, 0),     // 3: yellow
-        (0, 255, 0),       // 4: green
-        (0, 255, 255),     // 5: cyan
-        (0, 0, 255),       // 6: blue
-        (128, 0, 255),     // 7: purple
-        (255, 102, 178)    // 8: pink
-    ]
-
-    /// O(1) exact-match color lookup: key = r<<16 | g<<8 | b, value = classID (1-8)
-    private static let exactColorLookup: [UInt32: UInt8] = {
-        var table = [UInt32: UInt8]()
-        for (index, (r, g, b)) in classRGBColors.enumerated() {
-            let key = UInt32(r) << 16 | UInt32(g) << 8 | UInt32(b)
-            table[key] = UInt8(index + 1)
-        }
-        return table
-    }()
-
     /// Create a multi-class colored PNG from mask data
     /// Mask values: 0=background(white), 1-8=class colors
     private func createColoredPNG(from maskData: [UInt8], width: Int, height: Int, color: Color) -> Data? {
@@ -1329,9 +1335,9 @@ class CanvasViewModel: ObservableObject {
             let offset = i * bytesPerPixel
             let classID = Int(maskData[i])
 
-            if classID > 0 && classID <= Self.classRGBColors.count {
+            if classID > 0 && classID <= classRGBColors.count {
                 // Masked pixel: use corresponding class color
-                let (r, g, b) = Self.classRGBColors[classID - 1]
+                let (r, g, b) = classRGBColors[classID - 1]
                 pixelData[offset] = r
                 pixelData[offset + 1] = g
                 pixelData[offset + 2] = b
@@ -1372,7 +1378,7 @@ class CanvasViewModel: ObservableObject {
     }
 
     /// Thread-safe static version: O(1) exact match, fallback to nearest neighbor
-    private static func findNearestClassIDStatic(r: UInt8, g: UInt8, b: UInt8) -> Int {
+    private nonisolated static func findNearestClassIDStatic(r: UInt8, g: UInt8, b: UInt8) -> Int {
         // O(1) exact match (covers the vast majority of pixels)
         let key = UInt32(r) << 16 | UInt32(g) << 8 | UInt32(b)
         if let classID = exactColorLookup[key] {
@@ -1398,7 +1404,7 @@ class CanvasViewModel: ObservableObject {
     }
 
     /// Thread-safe static resize with nearest neighbor interpolation
-    private static func resizeMaskStatic(_ source: [UInt8], fromWidth: Int, fromHeight: Int, toWidth: Int, toHeight: Int) -> [UInt8] {
+    private nonisolated static func resizeMaskStatic(_ source: [UInt8], fromWidth: Int, fromHeight: Int, toWidth: Int, toHeight: Int) -> [UInt8] {
         var result = [UInt8](repeating: 0, count: toWidth * toHeight)
 
         let scaleX = Float(fromWidth) / Float(toWidth)
@@ -1422,7 +1428,7 @@ class CanvasViewModel: ObservableObject {
 
     /// Parse annotation PNG to class ID mask on a background thread.
     /// All operations (file I/O, decode, pixel parsing) are thread-safe.
-    static func parseAnnotationInBackground(
+    nonisolated static func parseAnnotationInBackground(
         annotationURL: URL,
         targetMaskWidth: Int,
         targetMaskHeight: Int
@@ -1650,12 +1656,6 @@ class CanvasViewModel: ObservableObject {
             }
             print("[ClassNames] Loaded: \(classNames.filter { !$0.isEmpty })")
         }
-    }
-
-    /// Load UI preferences from UserDefaults
-    private func loadUIPreferences() {
-        // UserDefaults.bool returns false if key doesn't exist, which is our desired default
-        showDeleteButton = UserDefaults.standard.bool(forKey: Self.showDeleteButtonKey)
     }
 
     /// Clear all class names
@@ -2118,5 +2118,4 @@ class CanvasViewModel: ObservableObject {
     }
 
 }
-
 

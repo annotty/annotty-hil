@@ -85,6 +85,11 @@ actor HILServerClient {
         return try await get(path: "/images/\(imageId)/download")
     }
 
+    /// Download label (mask) for an image, returns PNG data
+    func downloadLabel(imageId: String) async throws -> Data {
+        return try await get(path: "/labels/\(imageId)/download")
+    }
+
     /// Submit a labeled mask for an image (multipart/form-data)
     func submitLabel(imageId: String, maskPNG: Data) async throws -> SubmitResponse {
         let boundary = "Boundary-\(UUID().uuidString)"

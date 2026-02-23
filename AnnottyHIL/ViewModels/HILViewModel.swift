@@ -61,14 +61,30 @@ class HILViewModel: ObservableObject {
         canvasVM.runUNetPrediction()
     }
 
-    // MARK: - Submit & Next
+    // MARK: - Submit & Delete
 
-    /// Submit current mask to server, then load next recommended image
-    func submitAndNext(canvasVM: CanvasViewModel) async {
-        guard let imageId = currentImageId else {
+    /// Submit current mask to server, then delete the image from the device.
+    /// Derives imageId from the canvas's current filename (= server imageId).
+    func submitAndDelete(canvasVM: CanvasViewModel) async {
+        // Derive imageId from the currently displayed image filename
+        let imageId: String
+        if let fileName = canvasVM.currentImageFileName {
+            imageId = fileName
+            print("[HIL] Submit: resolved imageId from canvas filename: \(imageId)")
+        } else if let fallback = currentImageId {
+            imageId = fallback
+            print("[HIL] Submit: canvas filename nil, using fallback currentImageId: \(imageId)")
+        } else {
             errorMessage = "No image to submit"
+            print("[HIL] Submit: both canvas filename and currentImageId are nil")
+            print("[HIL] Debug: canvasVM.currentImageIndex=\(canvasVM.currentImageIndex), totalImageCount=\(canvasVM.totalImageCount)")
             return
         }
+
+        // Verify the image exists on the server
+        let knownOnServer = imageList.contains(where: { $0.id == imageId })
+        print("[HIL] Submit: imageId=\(imageId), knownOnServer=\(knownOnServer), imageList.count=\(imageList.count)")
+
         await updateBaseURL()
         isHILSubmitting = true
         errorMessage = nil
@@ -76,32 +92,93 @@ class HILViewModel: ObservableObject {
         do {
             // Export mask from canvas
             guard let maskPNG = canvasVM.exportMaskForServer() else {
+                print("[HIL] Submit: exportMaskForServer() returned nil")
                 throw HILError.maskConversionFailed
             }
+            print("[HIL] Submit: mask exported, size=\(maskPNG.count) bytes")
 
             // Submit to server
-            _ = try await client.submitLabel(imageId: imageId, maskPNG: maskPNG)
-            print("[HIL] Label submitted for \(imageId)")
+            let result = try await client.submitLabel(imageId: imageId, maskPNG: maskPNG)
+            print("[HIL] Submit: server response status=\(result.status)")
 
-            // Refresh image list
+            // Refresh image list & server info
             let response = try await client.listImages()
             imageList = response.images
-
-            // Update server info
             serverInfo = try await client.getInfo()
+            print("[HIL] Submit: refreshed imageList (\(imageList.count) images), labeled=\(serverInfo?.labeledImages ?? -1)")
 
-            // Get next sample
-            await fetchNextSample()
-
-            // Load next image into canvas
-            if let nextId = currentImageId {
-                await loadImageIntoCanvas(imageId: nextId, canvasVM: canvasVM)
-            }
+            // Delete current image from device (navigates to adjacent image automatically)
+            canvasVM.deleteCurrentImage()
+            currentImageId = nil
+            print("[HIL] Submit: deleted \(imageId) from device")
         } catch {
             errorMessage = "Submit failed: \(error.localizedDescription)"
+            print("[HIL] Submit: ERROR \(error)")
         }
 
         isHILSubmitting = false
+    }
+
+    // MARK: - Batch Import
+
+    /// Import multiple images from the server into the project
+    func importImages(imageIds: Set<String>, canvasVM: CanvasViewModel) async {
+        print("[HIL] Import: starting batch import of \(imageIds.count) images: \(imageIds.sorted())")
+        await updateBaseURL()
+        isLoading = true
+        errorMessage = nil
+
+        var lastImportedId: String?
+
+        for imageId in imageIds {
+            do {
+                // Skip if already in project
+                if canvasVM.navigateToImage(named: imageId) {
+                    print("[HIL] Import: \(imageId) already in project, skipped download")
+                    lastImportedId = imageId
+                    continue
+                }
+
+                // Download image (cache → server)
+                let imageData: Data
+                if let cached = cache.loadImage(imageId: imageId) {
+                    imageData = cached
+                } else {
+                    imageData = try await client.downloadImage(imageId: imageId)
+                    cache.saveImage(imageData, imageId: imageId)
+                }
+
+                // Save to temp and import
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(imageId)
+                try imageData.write(to: tempURL)
+                canvasVM.importImage(from: tempURL)
+
+                // If the image has a label on the server, download and save as annotation
+                if let imageInfo = imageList.first(where: { $0.id == imageId }), imageInfo.hasLabel {
+                    let labelData = try await client.downloadLabel(imageId: imageId)
+                    // Find the imported image URL in the project
+                    let imageURLs = ProjectFileService.shared.getImageURLs()
+                    if let imageURL = imageURLs.first(where: { $0.lastPathComponent == imageId }) {
+                        try ProjectFileService.shared.saveAnnotation(labelData, for: imageURL)
+                        print("[HIL] Import: saved label for \(imageId)")
+                    }
+                }
+
+                lastImportedId = imageId
+                print("[HIL] Import: \(imageId) imported")
+            } catch {
+                print("[HIL] Import: failed for \(imageId): \(error)")
+            }
+        }
+
+        // Navigate to the last imported image
+        if let lastId = lastImportedId {
+            let navigated = canvasVM.navigateToImage(named: lastId)
+            print("[HIL] Import: navigated to \(lastId): \(navigated)")
+        }
+
+        print("[HIL] Import: done. canvasVM.currentImageFileName=\(canvasVM.currentImageFileName ?? "nil"), totalImageCount=\(canvasVM.totalImageCount)")
+        isLoading = false
     }
 
     // MARK: - Training
@@ -147,27 +224,33 @@ class HILViewModel: ObservableObject {
     // MARK: - Image Loading
 
     /// Download image from server and load into canvas
+    /// Skips download if the image already exists in the project folder.
     func loadImageIntoCanvas(imageId: String, canvasVM: CanvasViewModel) async {
         await updateBaseURL()
         isLoading = true
         currentImageId = imageId
 
         do {
-            // Download (or use cache)
-            let imageData: Data
-            if let cached = cache.loadImage(imageId: imageId) {
-                imageData = cached
+            // Check if already in project — just navigate to it
+            if canvasVM.navigateToImage(named: imageId) {
+                print("[HIL] Image \(imageId) already in project, navigated")
             } else {
-                imageData = try await client.downloadImage(imageId: imageId)
-                cache.saveImage(imageData, imageId: imageId)
+                // Download (or use cache)
+                let imageData: Data
+                if let cached = cache.loadImage(imageId: imageId) {
+                    imageData = cached
+                } else {
+                    imageData = try await client.downloadImage(imageId: imageId)
+                    cache.saveImage(imageData, imageId: imageId)
+                }
+
+                // Save to temp and import (imageId already includes extension)
+                let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(imageId)
+                try imageData.write(to: tempURL)
+                canvasVM.importImage(from: tempURL)
+
+                print("[HIL] Image \(imageId) downloaded and loaded")
             }
-
-            // Save to project folder and import into canvas
-            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("\(imageId).png")
-            try imageData.write(to: tempURL)
-            canvasVM.importImage(from: tempURL)
-
-            print("[HIL] Image \(imageId) loaded into canvas")
         } catch {
             errorMessage = "Failed to load image: \(error.localizedDescription)"
         }

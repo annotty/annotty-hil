@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Right panel with annotation color, settings button, and U-Net button
+/// Right panel with annotation color, settings button, and HIL controls
 struct RightPanelView: View {
     @Binding var annotationColor: Color
     @Binding var isFillMode: Bool
@@ -10,15 +10,14 @@ struct RightPanelView: View {
     let classNames: [String]
     @Binding var hiddenClassIDs: Set<Int>
     let onSettingsTapped: () -> Void
-    let onUNetTapped: () -> Void
-
     // HIL parameters (optional — shown only when HIL is enabled)
     var isHILEnabled: Bool = false
     var isHILSubmitting: Bool = false
+    var localImageCount: Int = 0
     var trainingStatus: HILServerClient.TrainingStatus? = nil
     var serverInfo: HILServerClient.ServerInfo? = nil
     var onServerPredictTapped: (() -> Void)? = nil
-    var onSubmitNextTapped: (() -> Void)? = nil
+    var onSubmitTapped: (() -> Void)? = nil
     var onTrainTapped: (() -> Void)? = nil
     var onCancelTrainTapped: (() -> Void)? = nil
 
@@ -43,22 +42,11 @@ struct RightPanelView: View {
         return name.isEmpty ? "\(index + 1)" : name
     }
 
-    /// Train alert message with image counts
+    /// Train alert message with image counts (server labeled/total + local stock)
     private var trainAlertMessage: String {
         let labeled = serverInfo?.labeledImages ?? 0
         let total = serverInfo?.totalImages ?? 0
-        return "Images: \(labeled)/\(total) labeled\n\nTraining will overwrite the current model. This cannot be undone."
-    }
-
-    /// U-Net button label based on current state
-    private var unetButtonLabel: String {
-        if isUNetLoading {
-            return "Loading..."
-        } else if isUNetProcessing {
-            return "Processing"
-        } else {
-            return "U-Net"
-        }
+        return "Images: \(labeled)/\(total) labeled + \(localImageCount) on device\n\nTraining will overwrite the current model. This cannot be undone."
     }
 
     var body: some View {
@@ -194,29 +182,6 @@ struct RightPanelView: View {
                 .buttonStyle(.plain)
             }
 
-            // U-Net button
-            Button(action: onUNetTapped) {
-                VStack(spacing: 4) {
-                    if isUNetLoading || isUNetProcessing {
-                        ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                            .scaleEffect(0.8)
-                            .frame(width: 24, height: 24)
-                    } else {
-                        Image(systemName: "wand.and.stars")
-                            .font(.title2)
-                    }
-                    Text(unetButtonLabel)
-                        .font(.caption)
-                }
-                .foregroundColor(.white)
-                .padding(12)
-                .background(Color(white: 0.2))
-                .cornerRadius(8)
-            }
-            .buttonStyle(.plain)
-            .disabled(isUNetLoading || isUNetProcessing)
-
             // HIL buttons (shown only when HIL is enabled)
             if isHILEnabled {
                 Divider()
@@ -253,7 +218,7 @@ struct RightPanelView: View {
                     .disabled(isUNetLoading || isUNetProcessing || isHILSubmitting)
 
                     // Submit & Next button
-                    Button(action: { onSubmitNextTapped?() }) {
+                    Button(action: { onSubmitTapped?() }) {
                         VStack(spacing: 4) {
                             if isHILSubmitting {
                                 ProgressView()
@@ -345,8 +310,7 @@ struct RightPanelView: View {
         isUNetProcessing: false,
         classNames: ["iris", "eyelid", "sclera", "pupil", "", "", "", ""],
         hiddenClassIDs: .constant([]),
-        onSettingsTapped: {},
-        onUNetTapped: {}
+        onSettingsTapped: {}
     )
     .frame(width: 120, height: 600)
 }

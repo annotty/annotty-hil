@@ -1,11 +1,17 @@
 import SwiftUI
 
-/// Dashboard showing HIL server images and controls
+/// Dashboard showing HIL server images with batch selection and import
 struct HILDashboardView: View {
     @ObservedObject var hilViewModel: HILViewModel
     @ObservedObject var settings: HILSettings
-    let onImageSelected: (String) -> Void
+    let onImportSelected: (Set<String>) -> Void
     @Environment(\.dismiss) private var dismiss
+
+    @State private var selectedImageIds: Set<String> = []
+
+    private var allSelected: Bool {
+        !hilViewModel.imageList.isEmpty && selectedImageIds.count == hilViewModel.imageList.count
+    }
 
     var body: some View {
         NavigationStack {
@@ -15,6 +21,15 @@ struct HILDashboardView: View {
                     .padding()
 
                 Divider()
+
+                // Select All bar
+                if !hilViewModel.imageList.isEmpty {
+                    selectAllBar
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+
+                    Divider()
+                }
 
                 if hilViewModel.isLoading {
                     Spacer()
@@ -83,11 +98,39 @@ struct HILDashboardView: View {
         }
     }
 
+    // MARK: - Select All Bar
+
+    private var selectAllBar: some View {
+        HStack {
+            Spacer()
+            Button {
+                if allSelected {
+                    selectedImageIds.removeAll()
+                } else {
+                    selectedImageIds = Set(hilViewModel.imageList.map(\.id))
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    Text("Select All")
+                        .font(.subheadline)
+                        .foregroundColor(.primary)
+                    checkboxIcon(checked: allSelected)
+                }
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
     // MARK: - Image Row
 
     private func imageRow(_ image: HILServerClient.ImageInfo) -> some View {
-        Button {
-            onImageSelected(image.id)
+        let isSelected = selectedImageIds.contains(image.id)
+        return Button {
+            if isSelected {
+                selectedImageIds.remove(image.id)
+            } else {
+                selectedImageIds.insert(image.id)
+            }
         } label: {
             HStack(spacing: 12) {
                 // Thumbnail placeholder
@@ -120,13 +163,12 @@ struct HILDashboardView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                // Checkbox
+                checkboxIcon(checked: isSelected)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Color(white: 0.15))
+            .background(isSelected ? Color.accentColor.opacity(0.1) : Color(white: 0.15))
             .cornerRadius(10)
         }
         .buttonStyle(.plain)
@@ -135,33 +177,30 @@ struct HILDashboardView: View {
     // MARK: - Bottom Controls
 
     private var bottomControls: some View {
-        HStack(spacing: 12) {
-            // Next (Active Learning) button
-            Button {
-                Task {
-                    await hilViewModel.fetchNextSample()
-                    if let nextId = hilViewModel.currentImageId {
-                        onImageSelected(nextId)
-                        dismiss()
-                    }
-                }
-            } label: {
-                Label("Next (AL)", systemImage: "sparkles")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
+        Button {
+            onImportSelected(selectedImageIds)
+            dismiss()
+        } label: {
+            Label("Import (\(selectedImageIds.count) selected)", systemImage: "square.and.arrow.down")
+                .font(.body.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.blue)
+        .disabled(selectedImageIds.isEmpty)
+    }
 
-            // Start Training button
-            Button {
-                Task { await hilViewModel.startTraining() }
-            } label: {
-                Label("Train", systemImage: "brain")
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            .tint(.purple)
-            .disabled(hilViewModel.trainingStatus?.status == "running")
+    // MARK: - Checkbox Icon
+
+    private func checkboxIcon(checked: Bool) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.white)
+                .frame(width: 26, height: 26)
+            Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundColor(checked ? .accentColor : Color(white: 0.75))
         }
     }
 }
