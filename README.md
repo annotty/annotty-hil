@@ -37,7 +37,8 @@ AFTER: Annotty HIL
 |---|---|---|
 | Time per image | 30-60 min | 2-5 min |
 | Feedback loop | Days/weeks | Minutes |
-| Hardware needed | Desktop GPU | iPad + any PC |
+| Inference hardware | Desktop GPU | iPad (on-device CoreML) |
+| Training hardware | Desktop GPU | PC with GPU or cloud |
 | Works offline | No | AI prediction works offline |
 
 ## Architecture
