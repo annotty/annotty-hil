@@ -1,4 +1,4 @@
-# Annotty HIL
+# Annotty HIL (Human-in-the-Loop)
 
 **iPad annotation app with Human-in-the-Loop active learning for medical image segmentation.**
 
