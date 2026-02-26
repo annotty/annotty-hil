@@ -185,6 +185,7 @@ struct MainView: View {
             HILDashboardView(
                 hilViewModel: hilViewModel,
                 settings: hilSettings,
+                localImageNames: viewModel.localImageFileNames,
                 onImportSelected: { imageIds in
                     Task {
                         await hilViewModel.importImages(imageIds: imageIds, canvasVM: viewModel)

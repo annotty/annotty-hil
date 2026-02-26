@@ -166,6 +166,11 @@ class CanvasViewModel: ObservableObject {
         imageManager.currentItem?.url.lastPathComponent
     }
 
+    /// Set of all local image filenames (for checking which server images are already imported)
+    var localImageFileNames: Set<String> {
+        Set(imageManager.items.map { $0.url.lastPathComponent })
+    }
+
     // MARK: - Loading/Saving State
 
     @Published private(set) var isLoading: Bool = false

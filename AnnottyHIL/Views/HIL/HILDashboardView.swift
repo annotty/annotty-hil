@@ -4,6 +4,7 @@ import SwiftUI
 struct HILDashboardView: View {
     @ObservedObject var hilViewModel: HILViewModel
     @ObservedObject var settings: HILSettings
+    var localImageNames: Set<String> = []
     let onImportSelected: (Set<String>) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -125,6 +126,7 @@ struct HILDashboardView: View {
 
     private func imageRow(_ image: HILServerClient.ImageInfo) -> some View {
         let isSelected = selectedImageIds.contains(image.id)
+        let isLocal = localImageNames.contains(image.id)
         return Button {
             if isSelected {
                 selectedImageIds.remove(image.id)
@@ -133,13 +135,13 @@ struct HILDashboardView: View {
             }
         } label: {
             HStack(spacing: 12) {
-                // Thumbnail placeholder
+                // Thumbnail placeholder — tinted if on iPad
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(white: 0.2))
+                    .fill(isLocal ? Color.cyan.opacity(0.2) : Color(white: 0.2))
                     .frame(width: 50, height: 50)
                     .overlay {
-                        Image(systemName: "photo")
-                            .foregroundColor(.gray)
+                        Image(systemName: isLocal ? "ipad.and.arrow.forward" : "photo")
+                            .foregroundColor(isLocal ? .cyan : .gray)
                     }
 
                 // File info
@@ -148,6 +150,12 @@ struct HILDashboardView: View {
                         .font(.subheadline)
                         .foregroundColor(.primary)
                         .lineLimit(1)
+
+                    if isLocal {
+                        Text("On iPad")
+                            .font(.caption2)
+                            .foregroundColor(.cyan)
+                    }
                 }
 
                 Spacer()
@@ -168,7 +176,7 @@ struct HILDashboardView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.1) : Color(white: 0.15))
+            .background(isSelected ? Color.accentColor.opacity(0.1) : isLocal ? Color.cyan.opacity(0.05) : Color(white: 0.15))
             .cornerRadius(10)
         }
         .buttonStyle(.plain)
