@@ -127,6 +127,18 @@ struct HILDashboardView: View {
     private func imageRow(_ image: HILServerClient.ImageInfo) -> some View {
         let isSelected = selectedImageIds.contains(image.id)
         let isLocal = localImageNames.contains(image.id)
+
+        // Visual state: On iPad (cyan) > Labeled (green) > Unlabeled (default)
+        let tintColor: Color = isLocal ? .cyan : image.hasLabel ? .green : .gray
+        let bgColor: Color = isSelected ? Color.accentColor.opacity(0.1)
+            : isLocal ? Color.cyan.opacity(0.05)
+            : image.hasLabel ? Color.green.opacity(0.05)
+            : Color(white: 0.15)
+        let iconName = isLocal ? "ipad.and.arrow.forward"
+            : image.hasLabel ? "checkmark.circle" : "photo"
+        let statusText: String? = isLocal ? "On iPad"
+            : image.hasLabel ? "Submitted" : nil
+
         return Button {
             if isSelected {
                 selectedImageIds.remove(image.id)
@@ -135,13 +147,13 @@ struct HILDashboardView: View {
             }
         } label: {
             HStack(spacing: 12) {
-                // Thumbnail placeholder — tinted if on iPad
+                // Thumbnail placeholder
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(isLocal ? Color.cyan.opacity(0.2) : Color(white: 0.2))
+                    .fill(tintColor.opacity(0.2))
                     .frame(width: 50, height: 50)
                     .overlay {
-                        Image(systemName: isLocal ? "ipad.and.arrow.forward" : "photo")
-                            .foregroundColor(isLocal ? .cyan : .gray)
+                        Image(systemName: iconName)
+                            .foregroundColor(tintColor)
                     }
 
                 // File info
@@ -151,10 +163,10 @@ struct HILDashboardView: View {
                         .foregroundColor(.primary)
                         .lineLimit(1)
 
-                    if isLocal {
-                        Text("On iPad")
+                    if let statusText {
+                        Text(statusText)
                             .font(.caption2)
-                            .foregroundColor(.cyan)
+                            .foregroundColor(tintColor)
                     }
                 }
 
@@ -176,7 +188,7 @@ struct HILDashboardView: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(isSelected ? Color.accentColor.opacity(0.1) : isLocal ? Color.cyan.opacity(0.05) : Color(white: 0.15))
+            .background(bgColor)
             .cornerRadius(10)
         }
         .buttonStyle(.plain)
