@@ -138,6 +138,17 @@ actor HILServerClient {
         return try decoder.decode(NextSampleResponse.self, from: data)
     }
 
+    /// Download the latest CoreML model ZIP from the server (~50MB, 300s timeout)
+    func downloadLatestModel() async throws -> Data {
+        let url = try makeURL(path: "/models/latest")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 300
+        applyAuth(&request)
+        let (data, response) = try await session.data(for: request)
+        try validateResponse(response)
+        return data
+    }
+
     // MARK: - Private Helpers
 
     private func makeURL(path: String) throws -> URL {

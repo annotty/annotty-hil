@@ -17,7 +17,6 @@ struct TopBarView: View {
     let onUndo: () -> Void
     let onRedo: () -> Void
     let onDelete: () -> Void
-    let showDeleteButton: Bool
     let canUndo: Bool
     let canRedo: Bool
 
@@ -112,6 +111,21 @@ struct TopBarView: View {
             .buttonStyle(.plain)
             .disabled(totalCount == 0)
 
+            // Delete image button
+            Button(action: { showingDeleteAlert = true }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "xmark.bin")
+                    Text("Delete")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.red.opacity(0.9))
+                .foregroundColor(.white)
+                .cornerRadius(8)
+            }
+            .buttonStyle(.plain)
+            .disabled(totalCount == 0)
+
             // Clear annotation button
             Button(action: onClear) {
                 HStack(spacing: 4) {
@@ -126,23 +140,6 @@ struct TopBarView: View {
             }
             .buttonStyle(.plain)
             .disabled(totalCount == 0)
-
-            // Delete image button (toggled via Settings)
-            if showDeleteButton {
-                Button(action: { showingDeleteAlert = true }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "xmark.bin")
-                        Text("Delete")
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.red.opacity(0.9))
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-                }
-                .buttonStyle(.plain)
-                .disabled(totalCount == 0)
-            }
 
             // Export button
             Button(action: onExport) {
@@ -192,7 +189,6 @@ struct TopBarView: View {
         onUndo: {},
         onRedo: {},
         onDelete: {},
-        showDeleteButton: true,
         canUndo: true,
         canRedo: false
     )

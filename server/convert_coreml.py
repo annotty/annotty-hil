@@ -48,9 +48,12 @@ def convert_to_coreml(pytorch_path: str = None, output_path: str = None) -> str:
     logger.info("TorchScript変換完了")
 
     # 3. CoreMLに変換
+    #    TensorType: MLMultiArray入力を受け付ける（ImageTypeはCVPixelBuffer必須で不便）
+    #    出力名 "logits" はiPadアプリ側と一致させる
     mlmodel = ct.convert(
         traced,
-        inputs=[ct.ImageType(name="image", shape=(1, 3, IMAGE_SIZE, IMAGE_SIZE))],
+        inputs=[ct.TensorType(name="image", shape=(1, 3, IMAGE_SIZE, IMAGE_SIZE))],
+        outputs=[ct.TensorType(name="logits")],
         convert_to="mlprogram",
     )
     logger.info("CoreML変換完了")

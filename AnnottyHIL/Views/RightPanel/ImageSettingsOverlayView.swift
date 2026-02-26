@@ -10,7 +10,6 @@ struct ImageSettingsOverlayView: View {
     @Binding var maskEdgeAlpha: Float
     @Binding var smoothKernelSize: Int
     @Binding var classNames: [String]
-    @Binding var showDeleteButton: Bool
     var onClearClassNames: () -> Void
     var onDeleteAllFiles: () -> Void
 
@@ -196,22 +195,6 @@ struct ImageSettingsOverlayView: View {
                         .padding(.horizontal, 16)
 
                     // Toolbar section
-                    VStack(spacing: 8) {
-                        Text("Toolbar")
-                            .font(.caption)
-                            .foregroundColor(.gray)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 16)
-
-                        Toggle(isOn: $showDeleteButton) {
-                            Text("Show Delete Button")
-                                .font(.caption)
-                                .foregroundColor(.white)
-                        }
-                        .tint(.cyan)
-                        .padding(.horizontal, 16)
-                    }
-
                     Divider()
                         .background(Color.gray.opacity(0.5))
                         .padding(.horizontal, 16)
@@ -437,7 +420,6 @@ struct IntSettingsSliderView: View {
             maskEdgeAlpha: .constant(1.0),
             smoothKernelSize: .constant(21),
             classNames: .constant(["iris", "eyelid", "sclera", "pupil", "", "", "", ""]),
-            showDeleteButton: .constant(false),
             onClearClassNames: {},
             onDeleteAllFiles: {}
         )

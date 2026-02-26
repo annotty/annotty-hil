@@ -90,6 +90,11 @@ struct MainView: View {
                     },
                     onCancelTrainTapped: {
                         Task { await hilViewModel.cancelTraining() }
+                    },
+                    isSyncingModel: hilViewModel.isSyncingModel,
+                    modelSource: viewModel.unetService.modelSource,
+                    onSyncModelTapped: {
+                        Task { await hilViewModel.syncModel(canvasVM: viewModel) }
                     }
                 )
                 .frame(width: 120)

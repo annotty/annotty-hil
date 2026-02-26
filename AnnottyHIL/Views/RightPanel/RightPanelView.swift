@@ -20,6 +20,9 @@ struct RightPanelView: View {
     var onSubmitTapped: (() -> Void)? = nil
     var onTrainTapped: (() -> Void)? = nil
     var onCancelTrainTapped: (() -> Void)? = nil
+    var isSyncingModel: Bool = false
+    var modelSource: ModelSource = .bundled
+    var onSyncModelTapped: (() -> Void)? = nil
 
     @State private var showTrainAlert = false
 
@@ -286,6 +289,44 @@ struct RightPanelView: View {
                         }
                         .buttonStyle(.plain)
                     }
+
+                    Divider()
+                        .background(Color.gray)
+                        .padding(.vertical, 2)
+
+                    // Model source indicator
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(modelSource == .downloaded ? Color.green : Color.orange)
+                            .frame(width: 8, height: 8)
+                        Text(modelSource.rawValue)
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+
+                    // Sync Model button
+                    Button(action: { onSyncModelTapped?() }) {
+                        VStack(spacing: 4) {
+                            if isSyncingModel {
+                                ProgressView()
+                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                                    .scaleEffect(0.8)
+                                    .frame(width: 24, height: 24)
+                            } else {
+                                Image(systemName: "arrow.down.circle")
+                                    .font(.title3)
+                            }
+                            Text(isSyncingModel ? "Syncing..." : "Sync Model")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.white)
+                        .padding(10)
+                        .frame(maxWidth: .infinity)
+                        .background(Color.cyan.opacity(0.3))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSyncingModel)
                 }
             }
 

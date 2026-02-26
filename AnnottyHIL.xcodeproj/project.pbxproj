@@ -7,14 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		022CD93B02227936D7C41CF5 /* ZIPFoundation in Frameworks */ = {isa = PBXBuildFile; productRef = BABE5511BCC15ECCAE25A24F /* ZIPFoundation */; };
 		0CF65E524DA43BE2B46F0BB2 /* Shaders.metal in Sources */ = {isa = PBXBuildFile; fileRef = 0056E9E4DA095D2F76706355 /* Shaders.metal */; };
 		0E29E6E7D5B6CE9E419CCC27 /* CanvasTransform.swift in Sources */ = {isa = PBXBuildFile; fileRef = 907A485C4737E7D335884F11 /* CanvasTransform.swift */; };
 		0FF17D8C7841D89FC98EEB8D /* ExportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14FC8D484A826825628374F2 /* ExportService.swift */; };
 		179F243592CC651C27AB96AF /* HILViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63FA4E3B2749BDF623A08C69 /* HILViewModel.swift */; };
 		18D53B3A1410D2E5FBDD4361 /* MetalRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1A64C76B173B00E887F0277 /* MetalRenderer.swift */; };
 		1EC1D846E226DD1AA86E1F63 /* DrawingCanvasView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B026B84564EE8133CA325C77 /* DrawingCanvasView.swift */; };
+		25A7DF4068EAD31E53EABE57 /* unet_fold1.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = 37F948146D1B66ED7584A54D /* unet_fold1.mlpackage */; };
 		3A67074BFA2D750EEF84EEEE /* ImageNavigatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F28FB6C7727CCF892D221E0 /* ImageNavigatorView.swift */; };
+		3CBFE577983EDE9D72EE10F9 /* unet_fold2.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = 364DC43835FB2AE060AA5039 /* unet_fold2.mlpackage */; };
 		4A92CCBF782CB14BAECA3F1F /* ImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5964ED06DB3149AC4C4DBC71 /* ImportCoordinator.swift */; };
+		4E844979398E0760432C2DE2 /* unet_fold3.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = 0A10958A5DB4F4312BC96BD0 /* unet_fold3.mlpackage */; };
 		5010AE3CA6F0B4845FDB59B6 /* CGAffineTransform+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E3706132B35D70312068CFC /* CGAffineTransform+Extensions.swift */; };
 		514DBA4C1C644C59E4AFA07A /* ServerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFA03C467A45FAEDBBA966AA /* ServerSettingsView.swift */; };
 		54AD2405DB8B6AC4AC238C35 /* TextureManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBBFFE52EB8589D2062B6A8C /* TextureManager.swift */; };
@@ -29,6 +33,7 @@
 		7A50579BA7F1E62D82C8072B /* CacheManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93D1F5994EF9FA81129691C4 /* CacheManager.swift */; };
 		7BAA1E19631D42582B834FC4 /* TopBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A4A12E3B39F21AEE2D0FD8C /* TopBarView.swift */; };
 		84116A3A85A5A993F4941625 /* ImageLoadCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F83C4C94C60AEB525D24967 /* ImageLoadCache.swift */; };
+		863143A820CDFDC52976D396 /* unet_fold4.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = 42F5B920FADD82B652F153B8 /* unet_fold4.mlpackage */; };
 		9550000D6321A8BA81C9C31F /* UIColor+Hex.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFDCDA5E3E838BE72899BC9D /* UIColor+Hex.swift */; };
 		9F2C3166DCA46A460C8A9AAF /* UndoManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1422B0EF81D7814A898367D /* UndoManager.swift */; };
 		9FEBF47EFB8D905B65C1FA9F /* ColorMaskParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6C58A7BC0CB37C090DF4930C /* ColorMaskParser.swift */; };
@@ -38,6 +43,7 @@
 		BFE52515B20E96ECD50045A7 /* ExportSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BA7555D84F3CBA3F0E56C96 /* ExportSheetView.swift */; };
 		C20ADD7563A3E2A96653DFAB /* MaskClass.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8068274D6040C3B3397A065 /* MaskClass.swift */; };
 		C3E32096A4DC68D529A9B25F /* ContourExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3183AE91C104C19546E17C24 /* ContourExtractor.swift */; };
+		C6FA0187BEE44E82F37946BB /* ModelSyncManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C58F23F09EC8777FD98CDEC6 /* ModelSyncManager.swift */; };
 		D6ED66D5A604B285F09BDD20 /* AutoSaveService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 264F1944FDFD216F5297178A /* AutoSaveService.swift */; };
 		D8EF9D8097B1E68BAE2EA5D8 /* CanvasViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2553CA63EDFBA489A3626C1 /* CanvasViewModel.swift */; };
 		D95ABF898375B8203F349298 /* SmoothStrokeOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3284C396B0A2D8A9DB323497 /* SmoothStrokeOverlay.swift */; };
@@ -63,6 +69,7 @@
 		02450C2EA55C54C79CE6EFE8 /* AnnotationLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationLoader.swift; sourceTree = "<group>"; };
 		04CABF4DB4CF365754716B8D /* AnnotationProject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnotationProject.swift; sourceTree = "<group>"; };
 		05E0961747D5BA8C2BCEEA08 /* HILDashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HILDashboardView.swift; sourceTree = "<group>"; };
+		0A10958A5DB4F4312BC96BD0 /* unet_fold3.mlpackage */ = {isa = PBXFileReference; path = unet_fold3.mlpackage; sourceTree = "<group>"; };
 		0D84802100A6D26BF948DE68 /* AnnottyHILApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnnottyHILApp.swift; sourceTree = "<group>"; };
 		0F83C4C94C60AEB525D24967 /* ImageLoadCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageLoadCache.swift; sourceTree = "<group>"; };
 		14FC8D484A826825628374F2 /* ExportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportService.swift; sourceTree = "<group>"; };
@@ -74,11 +81,14 @@
 		3183AE91C104C19546E17C24 /* ContourExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContourExtractor.swift; sourceTree = "<group>"; };
 		31D7220D2E099BA51FC07EA8 /* ThicknessSliderView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThicknessSliderView.swift; sourceTree = "<group>"; };
 		3284C396B0A2D8A9DB323497 /* SmoothStrokeOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SmoothStrokeOverlay.swift; sourceTree = "<group>"; };
+		364DC43835FB2AE060AA5039 /* unet_fold2.mlpackage */ = {isa = PBXFileReference; path = unet_fold2.mlpackage; sourceTree = "<group>"; };
+		37F948146D1B66ED7584A54D /* unet_fold1.mlpackage */ = {isa = PBXFileReference; path = unet_fold1.mlpackage; sourceTree = "<group>"; };
 		385FA5A1064159691BCFE315 /* HILSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HILSettings.swift; sourceTree = "<group>"; };
 		3AEFDEE7D0FAB8C16AB43B40 /* AnnottyHIL.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AnnottyHIL.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3B282E4654B9476778199C76 /* HILServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HILServerClient.swift; sourceTree = "<group>"; };
 		3CE20451F312CAF48FFCE92D /* TrainingStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrainingStatusView.swift; sourceTree = "<group>"; };
 		4090D63B20B74DD02AAFAD99 /* COCOExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = COCOExporter.swift; sourceTree = "<group>"; };
+		42F5B920FADD82B652F153B8 /* unet_fold4.mlpackage */ = {isa = PBXFileReference; path = unet_fold4.mlpackage; sourceTree = "<group>"; };
 		4814CE455B25316F97D33366 /* UNetService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UNetService.swift; sourceTree = "<group>"; };
 		513F104C595E37CA884E4C7D /* MetalCanvasView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MetalCanvasView.swift; sourceTree = "<group>"; };
 		528E110F27E8A3B0D4F0B022 /* ProjectFileService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFileService.swift; sourceTree = "<group>"; };
@@ -103,6 +113,7 @@
 		BE43F010610701C418BC18E0 /* ImageSettingsOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ImageSettingsOverlayView.swift; sourceTree = "<group>"; };
 		C1422B0EF81D7814A898367D /* UndoManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UndoManager.swift; sourceTree = "<group>"; };
 		C2553CA63EDFBA489A3626C1 /* CanvasViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanvasViewModel.swift; sourceTree = "<group>"; };
+		C58F23F09EC8777FD98CDEC6 /* ModelSyncManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelSyncManager.swift; sourceTree = "<group>"; };
 		C8068274D6040C3B3397A065 /* MaskClass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaskClass.swift; sourceTree = "<group>"; };
 		CDC347BB1A395D084DE087A7 /* PNGExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PNGExporter.swift; sourceTree = "<group>"; };
 		DBBFFE52EB8589D2062B6A8C /* TextureManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextureManager.swift; sourceTree = "<group>"; };
@@ -113,6 +124,17 @@
 		EEBDD21292FF704B622F7045 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		EFDCDA5E3E838BE72899BC9D /* UIColor+Hex.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIColor+Hex.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		7F0EA326673DBF7D6E07E504 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				022CD93B02227936D7C41CF5 /* ZIPFoundation in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		1CE3E56099E09EE561FEF3BA = {
@@ -139,6 +161,7 @@
 				93D1F5994EF9FA81129691C4 /* CacheManager.swift */,
 				3B282E4654B9476778199C76 /* HILServerClient.swift */,
 				385FA5A1064159691BCFE315 /* HILSettings.swift */,
+				C58F23F09EC8777FD98CDEC6 /* ModelSyncManager.swift */,
 			);
 			path = HIL;
 			sourceTree = "<group>";
@@ -157,6 +180,10 @@
 		3D8167B3F00509D067A7507F /* Models */ = {
 			isa = PBXGroup;
 			children = (
+				37F948146D1B66ED7584A54D /* unet_fold1.mlpackage */,
+				364DC43835FB2AE060AA5039 /* unet_fold2.mlpackage */,
+				0A10958A5DB4F4312BC96BD0 /* unet_fold3.mlpackage */,
+				42F5B920FADD82B652F153B8 /* unet_fold4.mlpackage */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -359,6 +386,7 @@
 			buildPhases = (
 				F0837BF6BAFF6064285411F0 /* Sources */,
 				7603AE5D4D3572479415FEF4 /* Resources */,
+				7F0EA326673DBF7D6E07E504 /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -366,6 +394,7 @@
 			);
 			name = AnnottyHIL;
 			packageProductDependencies = (
+				BABE5511BCC15ECCAE25A24F /* ZIPFoundation */,
 			);
 			productName = AnnottyHIL;
 			productReference = 3AEFDEE7D0FAB8C16AB43B40 /* AnnottyHIL.app */;
@@ -396,6 +425,9 @@
 			);
 			mainGroup = 1CE3E56099E09EE561FEF3BA;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				47EEEC6660EDFBD948926771 /* XCRemoteSwiftPackageReference "ZIPFoundation" */,
+			);
 			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
@@ -452,6 +484,7 @@
 				C20ADD7563A3E2A96653DFAB /* MaskClass.swift in Sources */,
 				E22348CFCEF72BDBEA0BB8C0 /* MetalCanvasView.swift in Sources */,
 				18D53B3A1410D2E5FBDD4361 /* MetalRenderer.swift in Sources */,
+				C6FA0187BEE44E82F37946BB /* ModelSyncManager.swift in Sources */,
 				794795C6D1D6610CB1C63F60 /* PNGExporter.swift in Sources */,
 				E4841587A533D62AAAFF9E4D /* ProjectFileService.swift in Sources */,
 				F94C92117E90BBAC6606D0D2 /* RightPanelView.swift in Sources */,
@@ -469,6 +502,10 @@
 				9F2C3166DCA46A460C8A9AAF /* UndoManager.swift in Sources */,
 				BDC4A338A357539E3ECEE7BC /* YOLOExporter.swift in Sources */,
 				E4BEFBC08640599EFA02F254 /* simd+Extensions.swift in Sources */,
+				25A7DF4068EAD31E53EABE57 /* unet_fold1.mlpackage in Sources */,
+				3CBFE577983EDE9D72EE10F9 /* unet_fold2.mlpackage in Sources */,
+				4E844979398E0760432C2DE2 /* unet_fold3.mlpackage in Sources */,
+				863143A820CDFDC52976D396 /* unet_fold4.mlpackage in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -680,6 +717,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		47EEEC6660EDFBD948926771 /* XCRemoteSwiftPackageReference "ZIPFoundation" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/weichsel/ZIPFoundation";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.9.19;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BABE5511BCC15ECCAE25A24F /* ZIPFoundation */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 47EEEC6660EDFBD948926771 /* XCRemoteSwiftPackageReference "ZIPFoundation" */;
+			productName = ZIPFoundation;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 0D2967FAEFE815A683BD3EC7 /* Project object */;
 }

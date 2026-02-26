@@ -14,17 +14,19 @@ settings:
     SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY: YES
     STRING_CATALOG_GENERATE_SYMBOLS: YES
 
+packages:
+  ZIPFoundation:
+    url: https://github.com/weichsel/ZIPFoundation
+    from: "0.9.19"
+
 targets:
   AnnottyHIL:
     type: application
     platform: iOS
     sources:
       - path: AnnottyHIL
-        excludes:
-          - "**/*.mlpackage"
-    resources:
-      - path: AnnottyHIL/Services/UNet/Models
-        buildPhase: resources
+    dependencies:
+      - package: ZIPFoundation
     settings:
       base:
         INFOPLIST_FILE: AnnottyHIL/Info.plist

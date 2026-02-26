@@ -28,7 +28,7 @@ class TextureManager {
     private(set) var maskScaleFactor: Float = 2.0
 
     /// Maximum mask dimension
-    static let maxMaskDimension = 4096
+    nonisolated static let maxMaskDimension = 4096
 
     /// Maximum number of classes (1-8)
     static let maxClasses = 8
@@ -54,7 +54,7 @@ class TextureManager {
 
     /// Decode image from URL on any thread (no Metal dependency).
     /// Returns PreloadedImageData ready for applyPreloadedImage() on main thread.
-    static func prepareImageData(from url: URL) throws -> PreloadedImageData {
+    nonisolated static func prepareImageData(from url: URL) throws -> PreloadedImageData {
         guard let data = try? Data(contentsOf: url),
               let uiImage = UIImage(data: data),
               let cgImage = uiImage.cgImage else {

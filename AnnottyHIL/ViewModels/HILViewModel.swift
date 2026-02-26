@@ -16,6 +16,8 @@ class HILViewModel: ObservableObject {
     @Published var errorMessage: String?
 
     @Published var isHILSubmitting = false
+    @Published var isSyncingModel = false
+    @Published var syncError: String?
 
     // MARK: - Dependencies
 
@@ -256,6 +258,44 @@ class HILViewModel: ObservableObject {
         }
 
         isLoading = false
+    }
+
+    // MARK: - Model Sync
+
+    /// Download the latest server model and reload UNet for on-device inference.
+    /// Simply hits GET /models/latest — server returns 200+ZIP or 404.
+    func syncModel(canvasVM: CanvasViewModel) async {
+        await updateBaseURL()
+        isSyncingModel = true
+        syncError = nil
+
+        do {
+            // 1. Download model ZIP (server returns 404 if not available)
+            print("[HIL] Sync: downloading model...")
+            let zipData = try await client.downloadLatestModel()
+            print("[HIL] Sync: downloaded \(zipData.count) bytes")
+
+            // 2. Save and extract
+            let version = ISO8601DateFormatter().string(from: Date())
+            try await ModelSyncManager.shared.saveModel(zipData: zipData, version: version)
+
+            // 3. Reload UNet with new model
+            try await canvasVM.unetService.reloadModels()
+            print("[HIL] Sync: model reloaded successfully")
+
+        } catch let hilError as HILError {
+            if case .serverError(let code) = hilError, code == 404 {
+                syncError = "No model available on server"
+            } else {
+                syncError = hilError.localizedDescription
+            }
+            print("[HIL] Sync: \(syncError ?? "")")
+        } catch {
+            syncError = error.localizedDescription
+            print("[HIL] Sync: ERROR \(error)")
+        }
+
+        isSyncingModel = false
     }
 
     // MARK: - Private Helpers

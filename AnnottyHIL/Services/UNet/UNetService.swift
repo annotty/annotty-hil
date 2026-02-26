@@ -12,8 +12,15 @@ struct UNetMaskResult {
     let size: CGSize
 }
 
+/// Source of the loaded model(s)
+enum ModelSource: String {
+    case bundled = "Built-in"
+    case downloaded = "Server"
+}
+
 /// U-Net ensemble inference service (4-fold, prompt-free)
 /// Loads 4 CoreML models and averages their sigmoid outputs for robust segmentation.
+/// When a downloaded server model is available, uses that single model instead.
 @MainActor
 final class UNetService: ObservableObject {
     // MARK: - Published State
@@ -21,6 +28,7 @@ final class UNetService: ObservableObject {
     @Published private(set) var isReady: Bool = false
     @Published private(set) var isProcessing: Bool = false
     @Published private(set) var lastError: String?
+    @Published private(set) var modelSource: ModelSource = .bundled
 
     // MARK: - Models
 
@@ -43,17 +51,37 @@ final class UNetService: ObservableObject {
         print("[UNet] Service initialized (models not loaded yet)")
     }
 
-    /// Load all 4 fold CoreML models from the app bundle
+    /// Load models — prefers downloaded server model over bundled 4-fold ensemble
     func loadModels() async throws {
         if isReady {
             print("[UNet] Models already loaded")
             return
         }
 
-        print("[UNet] Loading \(Self.foldCount) fold models...")
-
         let config = MLModelConfiguration()
         config.computeUnits = Self.detectOptimalComputeUnits()
+
+        // Try downloaded server model first
+        let syncManager = ModelSyncManager.shared
+        if await syncManager.hasDownloadedModel, let serverModelURL = await syncManager.modelURL {
+            print("[UNet] Loading downloaded server model...")
+            let compiledURL: URL
+            if serverModelURL.pathExtension == "mlmodelc" {
+                compiledURL = serverModelURL
+            } else {
+                compiledURL = try await MLModel.compileModel(at: serverModelURL)
+            }
+            let model = try MLModel(contentsOf: compiledURL, configuration: config)
+            models = [model]
+            modelSource = .downloaded
+            isReady = true
+            lastError = nil
+            print("[UNet] Server model loaded (version: \(await syncManager.currentVersion ?? "unknown"))")
+            return
+        }
+
+        // Fall back to bundled 4-fold ensemble
+        print("[UNet] Loading \(Self.foldCount) bundled fold models...")
 
         var loadedModels: [MLModel] = []
 
@@ -73,9 +101,19 @@ final class UNetService: ObservableObject {
         }
 
         models = loadedModels
+        modelSource = .bundled
         isReady = true
         lastError = nil
-        print("[UNet] All \(Self.foldCount) models loaded successfully")
+        print("[UNet] All \(Self.foldCount) bundled models loaded successfully")
+    }
+
+    /// Reload models after a new server model is downloaded
+    func reloadModels() async throws {
+        print("[UNet] Reloading models...")
+        models = []
+        isReady = false
+        lastError = nil
+        try await loadModels()
     }
 
     /// Predict segmentation mask from a CGImage (prompt-free, full-image)
@@ -104,7 +142,13 @@ final class UNetService: ObservableObject {
                         "image": inputArray
                     ])
                     let output = try model.prediction(from: input)
-                    guard let logits = output.featureValue(for: "logits")?.multiArrayValue else {
+                    // Try "logits" first, fall back to first MultiArray output
+                    let logits: MLMultiArray
+                    if let named = output.featureValue(for: "logits")?.multiArrayValue {
+                        logits = named
+                    } else if let first = output.featureNames.lazy.compactMap({ output.featureValue(for: $0)?.multiArrayValue }).first {
+                        logits = first
+                    } else {
                         throw UNetError.inferenceError("No logits output from fold \(index + 1)")
                     }
                     return (index, logits)
@@ -143,7 +187,7 @@ final class UNetService: ObservableObject {
         // 4. Average + threshold (0.5) + circular mask → binary mask at 512x512
         //    Training excluded pixels outside the lens circle, so we hard-mask
         //    to a circle inscribed in the square (center, radius = size/2).
-        let divisor = Float(Self.foldCount)
+        let divisor = Float(models.count)
         let half = Float(Self.inputSize) / 2.0
         let radiusSq = half * half
         var smallMask = [UInt8](repeating: 0, count: pixelCount)
@@ -204,11 +248,11 @@ final class UNetService: ObservableObject {
         }
     }
 
-    /// Resize CGImage to 512x512 and create pre-compensated MLMultiArray [1, 3, H, W]
+    /// Resize CGImage to 512x512 and create ImageNet-normalized MLMultiArray [1, 3, H, W]
     ///
-    /// The CoreML models have a baked-in mul(1/255) op from the original ImageType conversion.
-    /// We compensate by providing: (pixel - 255*mean) / std
-    /// After the model's internal *1/255: (pixel/255 - mean) / std = correct ImageNet normalization.
+    /// Normalization differs by model source:
+    /// - Bundled (ImageType): has baked-in 1/255, so provide (pixel - 255*mean) / std
+    /// - Downloaded (TensorType): no internal preprocessing, provide (pixel/255 - mean) / std
     private func createNormalizedInputArray(from image: CGImage, size: Int) -> MLMultiArray? {
         // Draw image into an RGBA byte buffer at target size
         let bytesPerPixel = 4
@@ -238,12 +282,18 @@ final class UNetService: ObservableObject {
         let ptr = array.dataPointer.assumingMemoryBound(to: Float.self)
         let channelStride = size * size
 
-        // Pre-compensated ImageNet normalization:
-        // We provide (pixel - 255*mean) / std
-        // Model's baked-in *1/255 then gives: (pixel/255 - mean) / std ✓
-        let meanR = 255.0 * Self.imagenetMean[0]
-        let meanG = 255.0 * Self.imagenetMean[1]
-        let meanB = 255.0 * Self.imagenetMean[2]
+        // ImageNet normalization target: (pixel/255 - mean) / std
+        //
+        // Bundled (ImageType):   model has internal 1/255
+        //   → provide (pixel - 255*mean) / std, model divides by 255 → correct
+        // Downloaded (TensorType): no internal preprocessing
+        //   → provide (pixel/255 - mean) / std directly
+        let scale: Float = modelSource == .bundled ? 1.0 : (1.0 / 255.0)
+        let meanScale: Float = modelSource == .bundled ? 255.0 : 1.0
+
+        let meanR = meanScale * Self.imagenetMean[0]
+        let meanG = meanScale * Self.imagenetMean[1]
+        let meanB = meanScale * Self.imagenetMean[2]
         let stdR = Self.imagenetStd[0]
         let stdG = Self.imagenetStd[1]
         let stdB = Self.imagenetStd[2]
@@ -253,9 +303,9 @@ final class UNetService: ObservableObject {
                 let pixelIndex = (y * size + x) * bytesPerPixel
                 let spatialIndex = y * size + x
 
-                let r = Float(pixelData[pixelIndex])
-                let g = Float(pixelData[pixelIndex + 1])
-                let b = Float(pixelData[pixelIndex + 2])
+                let r = Float(pixelData[pixelIndex]) * scale
+                let g = Float(pixelData[pixelIndex + 1]) * scale
+                let b = Float(pixelData[pixelIndex + 2]) * scale
 
                 ptr[0 * channelStride + spatialIndex] = (r - meanR) / stdR
                 ptr[1 * channelStride + spatialIndex] = (g - meanG) / stdG
