@@ -23,6 +23,7 @@ struct RightPanelView: View {
     var isSyncingModel: Bool = false
     var modelSource: ModelSource = .bundled
     var onSyncModelTapped: (() -> Void)? = nil
+    var hilErrorMessage: String? = nil
 
     @State private var showTrainAlert = false
 
@@ -271,6 +272,18 @@ struct RightPanelView: View {
 
                     // Training status inline
                     TrainingStatusView(status: trainingStatus)
+
+                    // Error message (e.g. GPU busy)
+                    if let errorMsg = hilErrorMessage {
+                        Text(errorMsg)
+                            .font(.caption2)
+                            .foregroundColor(.red)
+                            .lineLimit(2)
+                            .frame(maxWidth: .infinity)
+                            .padding(6)
+                            .background(Color.red.opacity(0.15))
+                            .cornerRadius(6)
+                    }
 
                     // Cancel button (shown only during training)
                     if trainingStatus?.status == "running" {

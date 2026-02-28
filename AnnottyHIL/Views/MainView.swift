@@ -95,7 +95,8 @@ struct MainView: View {
                     modelSource: viewModel.unetService.modelSource,
                     onSyncModelTapped: {
                         Task { await hilViewModel.syncModel(canvasVM: viewModel) }
-                    }
+                    },
+                    hilErrorMessage: hilViewModel.errorMessage
                 )
                 .frame(width: 120)
             }

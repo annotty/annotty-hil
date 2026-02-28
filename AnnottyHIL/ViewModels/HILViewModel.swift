@@ -194,7 +194,8 @@ class HILViewModel: ObservableObject {
             _ = try await client.startTraining()
             startPollingTrainingStatus()
         } catch {
-            errorMessage = "Failed to start training: \(error.localizedDescription)"
+            errorMessage = error.localizedDescription
+            autoClearError()
         }
     }
 
@@ -284,7 +285,7 @@ class HILViewModel: ObservableObject {
             print("[HIL] Sync: model reloaded successfully")
 
         } catch let hilError as HILError {
-            if case .serverError(let code) = hilError, code == 404 {
+            if case .serverError(let code, _) = hilError, code == 404 {
                 syncError = "No model available on server"
             } else {
                 syncError = hilError.localizedDescription
@@ -302,6 +303,16 @@ class HILViewModel: ObservableObject {
 
     private func updateBaseURL() async {
         await client.updateSettings(baseURL: settings.serverURL, apiKey: settings.apiKey)
+    }
+
+    /// Clear errorMessage after 5 seconds
+    private func autoClearError() {
+        Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if errorMessage != nil {
+                errorMessage = nil
+            }
+        }
     }
 
     // MARK: - Training Status Polling

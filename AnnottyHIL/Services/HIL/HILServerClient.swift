@@ -110,7 +110,7 @@ actor HILServerClient {
         request.httpBody = body
 
         let (data, response) = try await session.data(for: request)
-        try validateResponse(response)
+        try validateResponse(response, data: data)
         return try decoder.decode(SubmitResponse.self, from: data)
     }
 
@@ -145,7 +145,7 @@ actor HILServerClient {
         request.timeoutInterval = 300
         applyAuth(&request)
         let (data, response) = try await session.data(for: request)
-        try validateResponse(response)
+        try validateResponse(response, data: data)
         return data
     }
 
@@ -164,7 +164,7 @@ actor HILServerClient {
         request.timeoutInterval = 30
         applyAuth(&request)
         let (data, response) = try await session.data(for: request)
-        try validateResponse(response)
+        try validateResponse(response, data: data)
         return data
     }
 
@@ -179,7 +179,7 @@ actor HILServerClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await session.data(for: request)
-        try validateResponse(response)
+        try validateResponse(response, data: data)
         return data
     }
 
@@ -189,12 +189,18 @@ actor HILServerClient {
         }
     }
 
-    private func validateResponse(_ response: URLResponse) throws {
+    private func validateResponse(_ response: URLResponse, data: Data? = nil) throws {
         guard let http = response as? HTTPURLResponse else {
             throw HILError.invalidResponse
         }
         guard (200...299).contains(http.statusCode) else {
-            throw HILError.serverError(statusCode: http.statusCode)
+            // Try to extract message from JSON response body
+            var serverMessage: String?
+            if let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                serverMessage = json["message"] as? String ?? json["error"] as? String
+            }
+            throw HILError.serverError(statusCode: http.statusCode, message: serverMessage)
         }
     }
 }
@@ -204,7 +210,7 @@ actor HILServerClient {
 enum HILError: LocalizedError {
     case invalidURL
     case invalidResponse
-    case serverError(statusCode: Int)
+    case serverError(statusCode: Int, message: String? = nil)
     case maskConversionFailed
 
     var errorDescription: String? {
@@ -213,7 +219,17 @@ enum HILError: LocalizedError {
             return "Invalid server URL"
         case .invalidResponse:
             return "Invalid response from server"
-        case .serverError(let code):
+        case .serverError(let code, let message):
+            if code == 409 {
+                // Map known 409 messages to short Japanese labels
+                if let msg = message {
+                    if msg.contains("GPU") { return "GPU使用中" }
+                    if msg.contains("already running") { return "トレーニング中" }
+                    return msg
+                }
+                return "サーバービジー"
+            }
+            if let message = message { return message }
             return "Server error (HTTP \(code))"
         case .maskConversionFailed:
             return "Failed to convert mask data"
