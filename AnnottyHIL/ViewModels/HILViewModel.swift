@@ -273,12 +273,14 @@ class HILViewModel: ObservableObject {
         do {
             // 1. Download model ZIP (server returns 404 if not available)
             print("[HIL] Sync: downloading model...")
-            let zipData = try await client.downloadLatestModel()
-            print("[HIL] Sync: downloaded \(zipData.count) bytes")
+            let download = try await client.downloadLatestModel()
+            print("[HIL] Sync: downloaded \(download.zipData.count) bytes (version=\(download.version ?? "?"), md5=\(download.md5 ?? "?"))")
 
-            // 2. Save and extract
-            let version = ISO8601DateFormatter().string(from: Date())
-            try await ModelSyncManager.shared.saveModel(zipData: zipData, version: version)
+            // 2. Save and extract — prefer server-supplied version/md5
+            let version = download.version
+                ?? download.md5
+                ?? ISO8601DateFormatter().string(from: Date())
+            try await ModelSyncManager.shared.saveModel(zipData: download.zipData, version: version)
 
             // 3. Reload UNet with new model
             try await canvasVM.unetService.reloadModels()

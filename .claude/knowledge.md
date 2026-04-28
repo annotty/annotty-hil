@@ -36,6 +36,35 @@
 - 例: `/models/latest` は 200(ZIP) or 404(なし) → クライアントは叩いて結果を受けるだけ
 - `/status` の `coreml_converted` 事前チェックは不要だった
 
+### "The data couldn't be read because it is missing." の正体
+- これは Swift `JSONDecoder` が必須キーを見つけられなかったとき（`DecodingError.keyNotFound`）の
+  デフォルトメッセージで、`HILError` のような `LocalizedError` から再投げると素のままユーザー画面に出る
+- "サーバーが何も返さない" ではなく "サーバーは返したが Codable が要求するキーが欠落／型違い" のサイン
+- 切り分けは curl で生レスポンスを見るのが確実。`unannotated_count` のような未知キーが入っていれば
+  サーバーが新仕様、クライアントが旧 Codable のミスマッチ
+- `HILError.decodingError(path:underlying:)` を持っておけば「どのエンドポイントの何のキーが NG か」が
+  ユーザー側にも開発者側にも一発で分かる
+
+### `keyDecodingStrategy = .convertFromSnakeCase` の限界
+- これはキー名のキャメルケース化のみ。`unannotated_count → unannotatedCount` には変わるが
+  `total_images → totalImages` のようなセマンティックなリネームには対応しない
+- サーバーとクライアントでフィールド名そのものが違うときは `CodingKeys` で明示マッピングが必要
+
+### プロトコル仕様書を単一真実源に置く
+- iPad とサーバーのレスポンス形式が静かにドリフトする問題は、`docs/protocol.md` のような
+  仕様書を作って両側がそれに従う構造にすると防げる
+- バージョニングは `protocol_version: "MAJOR.MINOR"` のような文字列が良い。整数だと「破壊変更しか
+  できず実運用で詰む」、セマバ的な major.minor.patch まで分けると過剰になりがち
+- 訓練ステータスのような optional 多用フィールドは「idle 時は state のみ、running 時は埋める」
+  という運用にすると Codable と相性が良い（Swift は `Int? String?` でそのまま受けられる）
+
+### マスク形式の選択肢
+- **インデックス画像 PNG（1ch、画素値=クラスID）**: 軽量、クラス数増減に強い、Preview.app では真っ黒
+- **RGB PNG（3ch、palette 色で着色）**: 視認性最強、デバッグしやすい、palette を共有する必要あり
+- Annotty HIL では後者を採用（プロトコル v1.0、`docs/protocol.md` §5.1）。
+  palette は iPad 側が真、`POST /config` でサーバーに伝える方式
+- アンチエイリアスや色補間が混入すると palette 逆引きが壊れるので、リサイズは必ず最近傍補間
+
 ## ZIPFoundation
 - SPM: `https://github.com/weichsel/ZIPFoundation` from "0.9.19"
 - `FileManager.unzipItem(at:to:)` で ZIP 展開
