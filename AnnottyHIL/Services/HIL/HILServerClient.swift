@@ -35,8 +35,9 @@ actor HILServerClient {
     // MARK: - Response Models (protocol v1)
 
     struct Counts: Codable {
-        let unannotated: Int
-        let completed: Int
+        let pending: Int
+        let submitted: Int
+        let fixed: Int
         let total: Int
     }
 
@@ -57,15 +58,18 @@ actor HILServerClient {
         let counts: Counts
         let model: ModelInfo
 
-        // UI compatibility aliases
+        // UI compatibility aliases (3-pool aware)
         var totalImages: Int { counts.total }
-        var labeledImages: Int { counts.completed }
-        var unlabeledImages: Int { counts.unannotated }
+        /// 完成済み label の数 = submitted + fixed
+        var labeledImages: Int { counts.submitted + counts.fixed }
+        /// HITL 前 = pending プール
+        var unlabeledImages: Int { counts.pending }
         var modelLoaded: Bool { model.bestExists }
     }
 
     /// Lightweight UI-facing image entry. Built client-side by joining
-    /// `pool=unannotated` and `pool=completed` listings.
+    /// the three pool listings. `hasLabel == true` means the image lives in
+    /// `submitted` or `fixed` (i.e. has a finalized annotation).
     struct ImageInfo: Codable, Identifiable, Hashable {
         let id: String
         let hasLabel: Bool
@@ -170,21 +174,22 @@ actor HILServerClient {
         _ = try await post(path: "/config", body: body)
     }
 
-    /// Raw images listing for a single pool (`unannotated` or `completed`).
-    func listImagesEnvelope(pool: String = "unannotated") async throws -> ImagesEnvelope {
+    /// Raw images listing for a single pool (`pending`, `submitted`, or `fixed`).
+    func listImagesEnvelope(pool: String = "pending") async throws -> ImagesEnvelope {
         let data = try await get(path: "/images?pool=\(pool)")
         return try decode(ImagesEnvelope.self, from: data, path: "/images")
     }
 
     /// Composite listing for the dashboard: every server image with a
-    /// `hasLabel` flag derived from whether it lives in the `completed` pool.
+    /// `hasLabel` flag (true iff the image lives in `submitted` or `fixed`).
     func listImages() async throws -> ImageListResponse {
-        async let unannotated = listImagesEnvelope(pool: "unannotated")
-        async let completed = listImagesEnvelope(pool: "completed")
-        let (u, c) = try await (unannotated, completed)
-        let completedSet = Set(c.items)
-        let merged = (u.items + c.items).map {
-            ImageInfo(id: $0, hasLabel: completedSet.contains($0))
+        async let pending = listImagesEnvelope(pool: "pending")
+        async let submitted = listImagesEnvelope(pool: "submitted")
+        async let fixed = listImagesEnvelope(pool: "fixed")
+        let (p, s, f) = try await (pending, submitted, fixed)
+        let labeledSet = Set(s.items).union(f.items)
+        let merged = (p.items + s.items + f.items).map {
+            ImageInfo(id: $0, hasLabel: labeledSet.contains($0))
         }
         return ImageListResponse(images: merged)
     }

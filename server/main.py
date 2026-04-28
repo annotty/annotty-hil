@@ -1,10 +1,9 @@
 """
-Annotty HIL Server — protocol v1.0 reference implementation
+Annotty HIL Server — protocol v1.0 reference implementation (3-pool revision)
 docs/protocol.md を本実装の単一真実源とする。
 """
 import os
 import re
-import io
 import time
 import hashlib
 import logging
@@ -13,9 +12,9 @@ import shutil
 import tempfile
 from datetime import datetime
 
-from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException, Request
+from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import uvicorn
 
@@ -23,10 +22,13 @@ from config import (
     BEST_MODEL_PATH, COREML_PATH, LOG_DIR,
     STATIC_DIR, SERVER_HOST, SERVER_PORT, MIN_IMAGES_FOR_TRAINING,
     DEFAULT_MAX_EPOCHS, N_FOLDS, IMAGE_SIZE,
-    COMPLETED_IMAGES_DIR, COMPLETED_ANNOTATIONS_DIR,
-    UNANNOTATED_IMAGES_DIR, UNANNOTATED_ANNOTATIONS_DIR,
+    PENDING_IMAGES_DIR, PENDING_LABELS_DIR,
+    SUBMITTED_IMAGES_DIR, SUBMITTED_LABELS_DIR,
+    FIXED_IMAGES_DIR, FIXED_LABELS_DIR,
 )
-from data_manager import DataManager
+from data_manager import (
+    DataManager, ImageNotFoundError, PoolReadOnlyError,
+)
 
 PROTOCOL_VERSION = "1.0"
 SERVER_NAME = "Annotty HIL Server"
@@ -90,7 +92,6 @@ _IMAGE_ID_RE = re.compile(r"^[A-Za-z0-9_\-\.]+\.(png|jpg|jpeg)$", re.IGNORECASE)
 
 
 def validate_image_id(image_id: str) -> None:
-    """パストラバーサル対策。不正なら HTTP 400 を投げる。"""
     if ".." in image_id or "/" in image_id or "\\" in image_id:
         raise HTTPException(status_code=400, detail="invalid image_id")
     if not _IMAGE_ID_RE.match(image_id):
@@ -119,12 +120,10 @@ def file_md5(path: str) -> str | None:
 
 
 def model_info() -> dict:
-    """protocol v1 §7.1 model フィールドを構築"""
     coreml_exists = os.path.exists(COREML_PATH)
     if coreml_exists:
         updated_at = os.path.getmtime(COREML_PATH)
         version = datetime.fromtimestamp(updated_at).strftime("%Y%m%d-%H%M%S")
-        # mlpackage はディレクトリなので manifest.json の MD5 を代表値に
         manifest = os.path.join(COREML_PATH, "Manifest.json")
         md5 = file_md5(manifest) if os.path.exists(manifest) else None
     else:
@@ -140,45 +139,12 @@ def model_info() -> dict:
     }
 
 
-def list_pool(pool: str) -> list[str]:
-    if pool == "unannotated":
-        directory = UNANNOTATED_IMAGES_DIR
-    elif pool == "completed":
-        directory = COMPLETED_IMAGES_DIR
-    else:
-        raise HTTPException(status_code=400, detail=f"unknown pool: {pool}")
-    if not os.path.isdir(directory):
-        return []
-    return sorted(
-        f for f in os.listdir(directory)
-        if _IMAGE_ID_RE.match(f) and not f.startswith(".")
-    )
-
-
-def find_pool(image_id: str) -> str | None:
-    if os.path.exists(os.path.join(COMPLETED_IMAGES_DIR, image_id)):
-        return "completed"
-    if os.path.exists(os.path.join(UNANNOTATED_IMAGES_DIR, image_id)):
-        return "unannotated"
-    return None
-
-
 def image_meta(image_id: str) -> dict:
-    pool = find_pool(image_id)
+    pool = dm.find_pool(image_id)
     if pool is None:
         raise HTTPException(status_code=404, detail="image not found")
 
-    if pool == "completed":
-        img_path = os.path.join(COMPLETED_IMAGES_DIR, image_id)
-        ann_path = os.path.join(COMPLETED_ANNOTATIONS_DIR, image_id)
-        has_annotation = os.path.exists(ann_path)
-        has_seed = has_annotation
-    else:
-        img_path = os.path.join(UNANNOTATED_IMAGES_DIR, image_id)
-        seed_path = os.path.join(UNANNOTATED_ANNOTATIONS_DIR, image_id)
-        has_annotation = False
-        has_seed = os.path.exists(seed_path)
-
+    img_path = dm.get_image_path(image_id)
     width, height = 0, 0
     try:
         from PIL import Image
@@ -190,8 +156,8 @@ def image_meta(image_id: str) -> dict:
     return {
         "image_id": image_id,
         "pool": pool,
-        "has_seed": has_seed,
-        "has_annotation": has_annotation,
+        "has_seed": dm.has_seed(image_id) if pool == "pending" else False,
+        "has_annotation": dm.has_annotation(image_id),
         "bytes": os.path.getsize(img_path),
         "width": width,
         "height": height,
@@ -214,9 +180,10 @@ def get_info():
         "class_names": class_names if class_names is not None else [],
         "input_size": IMAGE_SIZE,
         "counts": {
-            "unannotated": stats["unannotated_images"],
-            "completed": stats["completed_images"],
-            "total": stats["unannotated_images"] + stats["completed_images"],
+            "pending": stats["pending"],
+            "submitted": stats["submitted"],
+            "fixed": stats["fixed"],
+            "total": stats["pending"] + stats["submitted"] + stats["fixed"],
         },
         "model": model_info(),
     }
@@ -244,16 +211,17 @@ def post_config(cfg: ClientConfig):
             raise HTTPException(status_code=400, detail="palette entries must be [R,G,B] in 0..255")
 
     stats = dm.get_stats()
+    submitted_or_fixed = stats["submitted"] + stats["fixed"]
     with config_lock:
         prev_palette = client_config["palette"]
         if (
             prev_palette is not None
             and prev_palette != cfg.palette
-            and stats["completed_images"] > 0
+            and submitted_or_fixed > 0
         ):
             raise HTTPException(
                 status_code=409,
-                detail="palette change forbidden while completed pool is non-empty",
+                detail="palette change forbidden while submitted/fixed pools are non-empty",
             )
         client_config["palette"] = cfg.palette
         client_config["class_names"] = cfg.class_names
@@ -267,8 +235,10 @@ def post_config(cfg: ClientConfig):
 # §7.3 GET /images
 # =====================================================
 @app.get("/images")
-def list_images(pool: str = "unannotated"):
-    items = list_pool(pool)
+def list_images(pool: str = "pending"):
+    if pool not in DataManager.POOLS:
+        raise HTTPException(status_code=400, detail=f"unknown pool: {pool}")
+    items = dm.list_pool_images(pool)
     return {"pool": pool, "count": len(items), "items": items}
 
 
@@ -287,29 +257,21 @@ def get_image_meta(image_id: str):
 @app.get("/images/{image_id}/download")
 def download_image(image_id: str):
     validate_image_id(image_id)
-    pool = find_pool(image_id)
-    if pool is None:
+    path = dm.get_image_path(image_id)
+    if path is None:
         raise HTTPException(status_code=404, detail="image not found")
-    directory = COMPLETED_IMAGES_DIR if pool == "completed" else UNANNOTATED_IMAGES_DIR
-    path = os.path.join(directory, image_id)
     media_type = "image/jpeg" if image_id.lower().endswith((".jpg", ".jpeg")) else "image/png"
     return FileResponse(path, media_type=media_type)
 
 
 # =====================================================
-# §7.6 GET /labels/{id}/download
+# §7.6 GET /labels/{id}/download (検索順: submitted → fixed → pending)
 # =====================================================
 @app.get("/labels/{image_id}/download")
 def download_label(image_id: str):
     validate_image_id(image_id)
-    pool = find_pool(image_id)
-    if pool is None:
-        raise HTTPException(status_code=404, detail="image not found")
-    if pool == "completed":
-        path = os.path.join(COMPLETED_ANNOTATIONS_DIR, image_id)
-    else:
-        path = os.path.join(UNANNOTATED_ANNOTATIONS_DIR, image_id)
-    if not os.path.exists(path):
+    path = dm.get_label_path(image_id)
+    if path is None:
         raise HTTPException(status_code=404, detail="label not found")
     return FileResponse(path, media_type="image/png")
 
@@ -321,19 +283,14 @@ def download_label(image_id: str):
 def infer(image_id: str):
     validate_image_id(image_id)
     palette = require_palette()
-    pool = find_pool(image_id)
-    if pool is None:
+    image_path = dm.get_image_path(image_id)
+    if image_path is None:
         raise HTTPException(status_code=404, detail="image not found")
     if not os.path.exists(BEST_MODEL_PATH):
         raise HTTPException(status_code=503, detail="model not available, train first")
 
-    directory = COMPLETED_IMAGES_DIR if pool == "completed" else UNANNOTATED_IMAGES_DIR
-    image_path = os.path.join(directory, image_id)
-
     try:
         from inference import run_inference
-        # 推論結果はクラス ID 配列 (H,W) または既存の単一マスク。
-        # palette を渡し、RGB PNG を返却する。
         png_bytes = run_inference(image_path, BEST_MODEL_PATH, palette=palette)
         if png_bytes is None:
             raise HTTPException(status_code=503, detail="model not available, train first")
@@ -351,23 +308,26 @@ def infer(image_id: str):
 @app.put("/submit/{image_id}")
 async def submit_label(image_id: str, file: UploadFile = File(...)):
     validate_image_id(image_id)
-    require_palette()  # palette 未設定なら 503
-
+    require_palette()
     content = await file.read()
     try:
-        dm.save_annotation(image_id, content)
+        status, pool = dm.submit(image_id, content)
+    except ImageNotFoundError:
+        raise HTTPException(status_code=404, detail="image not found")
+    except PoolReadOnlyError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    return {"status": "saved", "image_id": image_id, "pool": "completed"}
+    return {"status": status, "image_id": image_id, "pool": pool}
 
 
 # =====================================================
-# §7.9 GET /next
+# §7.9 GET /next (pending only)
 # =====================================================
 @app.get("/next")
 def get_next(strategy: str = "random"):
-    image_id = dm.get_next_unlabeled(strategy=strategy)
+    image_id = dm.get_next_pending(strategy=strategy)
     if image_id is None:
         return {"image_id": None}
     return image_meta(image_id)
@@ -551,7 +511,8 @@ if __name__ == "__main__":
     logger.info(f"listening on http://{SERVER_HOST}:{SERVER_PORT}")
     stats = dm.get_stats()
     logger.info(
-        f"data: completed={stats['completed_images']}, "
-        f"unannotated={stats['unannotated_images']}"
+        f"data: pending={stats['pending']}, "
+        f"submitted={stats['submitted']}, "
+        f"fixed={stats['fixed']}"
     )
     uvicorn.run(app, host=SERVER_HOST, port=SERVER_PORT)

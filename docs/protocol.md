@@ -27,8 +27,9 @@
 | **Class** | セグメンテーションの分類。クラス ID は `0..num_classes-1` の整数 |
 | **Class 0 (background)** | 背景クラス。慣習的に「塗らない」領域に対応する。マスク PNG では `(0, 0, 0)` |
 | **Palette** | クラス ID → RGB 色 のマッピング。`palette[i] = [R, G, B]`、長さ `num_classes` |
-| **Pool** | 画像の状態カテゴリ。`unannotated`（未アノテーション）/ `completed`（提出済み）の 2 種 |
-| **Seed** | サーバーが事前推論で生成した「種マスク」。クライアントがそれを編集してアノテーション完成形にする |
+| **Pool** | 画像の状態カテゴリ。`pending`（HITL 前）/ `submitted`（HITL 後）/ `fixed`（固定データ）の 3 種 |
+| **Seed** | `pending` プールに置かれている任意の参考 label。クライアントがそれを編集してアノテーション完成形にする。学習には使わない |
+| **Training set** | 学習に使うデータ集合。`submitted ∪ fixed` の (image, label) ペア。`pending` は **学習に含めない** |
 
 ---
 
@@ -113,30 +114,51 @@
 ### 6.1 画像のプール
 
 ```
-            ┌────────────────────┐
-            │   unannotated      │
-            │  (未提出)           │
-            └─────────┬──────────┘
-                      │ PUT /submit/{id}
-                      ▼
-            ┌────────────────────┐
-            │   completed        │
-            │  (提出済み)         │
-            └────────────────────┘
+                                     ┌────────────────────┐
+                                     │   fixed            │
+                                     │  (固定データ・read- │
+                                     │   only・学習用)     │
+                                     └────────────────────┘
+
+  ┌────────────────────┐                ┌────────────────────┐
+  │   pending          │ PUT /submit/   │   submitted        │
+  │  (HITL 前)          │ ─────────────▶ │  (HITL 後・学習用) │
+  │  seed label 任意   │  (物理移動)    │  再 submit で上書き │
+  └────────────────────┘                └────────────────────┘
+                                                 │
+                                                 │ PUT /submit/ (再 submit)
+                                                 ▼
+                                        ┌────────────────────┐
+                                        │   submitted        │
+                                        │  (label 上書き)    │
+                                        └────────────────────┘
 ```
 
-- 画像は最初 `unannotated` プールに存在する。
-- `PUT /submit/{id}` で人手アノテーション（マスク）が登録されると `completed` プールへ遷移する。
-- 一度 `completed` になった画像は通常戻らない（再アノテーションには別途 API が必要だが v1.0 範囲外）。
+| プール | 役割 | label の有無 | 学習対象 | 書込 |
+|---|---|---|---|---|
+| **`pending`** | HITL 前。任意で参考 label（seed）を持てる | optional | × | サーバー設置者のみ |
+| **`submitted`** | iPad の `PUT /submit` で確定したもの。再 DL → 編集 → 再 submit 可 | 必須 | ○ | iPad（`PUT /submit` 経由） |
+| **`fixed`** | 既に完成済の learning set。HITL 不要 | 必須 | ○ | read-only（サーバー設置者のみ追加） |
+
+**遷移ルール**:
+- `pending` の画像に `PUT /submit/{id}` が来ると、画像とマスクは **物理的に `submitted` へ移動** する。`pending/labels/` に seed があった場合も `submitted/labels/` に新規マスクが置かれ、seed は破棄される。
+- `submitted` の画像に `PUT /submit/{id}` が来ると **`submitted/labels/{id}` を上書き**（再編集扱い）。画像本体は移動しない。
+- `fixed` の画像に `PUT /submit/{id}` が来ると **HTTP 409** で拒否（read-only ポリシー）。
+- `fixed` への画像追加・削除はサーバー設置者の責務（API では行わない）。
 
 ### 6.2 画像のメタフラグ
 
 | フラグ | 意味 |
 |---|---|
-| `has_seed` | サーバーがその画像に対する「種マスク」（推論結果や事前準備マスク）を保持しているか |
-| `has_annotation` | 人手アノテーションが完了しているか（= `completed` プールに存在するか） |
+| `has_seed` | `pool == "pending"` のとき、その画像に対する seed label が `pending/labels/` に物理存在するか。pending 以外のプールでは常に false |
+| `has_annotation` | 確定 label（`submitted/labels/` または `fixed/labels/`）が存在するか。すなわち `pool ∈ {submitted, fixed}` のとき true |
 
-### 6.3 訓練ステートマシン
+### 6.3 学習データの取得
+
+- 学習ペアは **`submitted` の全 (image, label) ペア + `fixed` の全 (image, label) ペア**。
+- `pending` の seed label は **学習に使わない**（プロジェクトを切り替えても学習結果に影響しないため）。
+
+### 6.4 訓練ステートマシン
 
 ```
    idle ──POST /train──▶ running ──完了──▶ completed
@@ -169,8 +191,9 @@
   "class_names": ["background", "brow", "sclera", "exposed_iris", "caruncle", "lid", "occluded_iris"],
   "input_size": 512,
   "counts": {
-    "unannotated": 2824,
-    "completed": 0,
+    "pending": 2824,
+    "submitted": 0,
+    "fixed": 0,
     "total": 2824
   },
   "model": {
@@ -190,9 +213,10 @@
 | `num_classes` | ✓ | int | クラス数（≥ 2） |
 | `class_names` | ✓ | string[] | クラス名（長さ = `num_classes`、index 0 は `"background"` 推奨） |
 | `input_size` | ✓ | int | モデル入力解像度（正方形 1 辺、ピクセル） |
-| `counts.unannotated` | ✓ | int | 未提出画像数 |
-| `counts.completed` | ✓ | int | 提出済み画像数 |
-| `counts.total` | ✓ | int | 総数（= `unannotated + completed`） |
+| `counts.pending` | ✓ | int | HITL 前画像数 |
+| `counts.submitted` | ✓ | int | HITL 後画像数（iPad で submit 済） |
+| `counts.fixed` | ✓ | int | 固定データ画像数（read-only） |
+| `counts.total` | ✓ | int | 総数（= `pending + submitted + fixed`） |
 | `model.best_exists` | ✓ | bool | 最良モデルの重みファイルが存在するか |
 | `model.coreml_exists` | ✓ | bool | CoreML 変換済みファイルが存在するか |
 | `model.version` | ✓ | string | モデル世代識別子（学習回数や日時など、不透明文字列） |
@@ -225,15 +249,15 @@
 
 > **整合性ポリシー**: 既に `completed` プールに画像がある状態で `palette` の **色の組** を変更するとマスクのクラス対応が壊れる。サーバーは `completed_count > 0` のとき palette 変更要求を **HTTP 409** で拒否してもよい（実装裁量）。
 
-### 7.3 `GET /images?pool=<unannotated|completed>` — 画像一覧
+### 7.3 `GET /images?pool=<pending|submitted|fixed>` — 画像一覧
 
 クエリパラメータ:
-- `pool`: 省略時 `unannotated`。
+- `pool`: 省略時 `pending`。
 
 レスポンス 200:
 ```json
 {
-  "pool": "unannotated",
+  "pool": "pending",
   "count": 2824,
   "items": ["0_celeb_crop_celeb.jpg", "1_celeb_crop_celeb.jpg", "..."]
 }
@@ -247,7 +271,7 @@
 ```json
 {
   "image_id": "0_celeb_crop_celeb.jpg",
-  "pool": "unannotated",
+  "pool": "pending",
   "has_seed": true,
   "has_annotation": false,
   "bytes": 10844,
@@ -256,6 +280,8 @@
 }
 ```
 
+`pool` は `"pending" / "submitted" / "fixed"` のいずれか。
+
 ### 7.5 `GET /images/{image_id}/download` — 画像本体ダウンロード
 
 レスポンス 200: `image/png` または `image/jpeg`（バイナリ）。
@@ -263,9 +289,10 @@
 
 ### 7.6 `GET /labels/{image_id}/download` — マスクダウンロード
 
-人手アノテーション済みマスク（`completed` プール）または種マスク（seed）を返す。
+該当画像のマスクを返す。サーバーは **`submitted` → `fixed` → `pending`** の優先順で検索し、最初に見つかったものを返す（最新の確定 label > 学習用 label > seed）。
+
 レスポンス 200: `image/png`（§5.1 の RGB PNG）。
-404: マスクが存在しない。
+404: マスクがどのプールにも存在しない。
 
 ### 7.7 `POST /infer/{image_id}` — 推論
 
@@ -280,23 +307,27 @@
 リクエスト: `multipart/form-data`
 - フィールド名 `file`、`Content-Type: image/png`、内容は §5.1 の RGB PNG。
 
-レスポンス 200:
-```json
-{ "status": "saved", "image_id": "0_celeb_crop_celeb.jpg", "pool": "completed" }
-```
+挙動はリクエスト時の `pool` で分岐する（§6.1 参照）：
 
-- 提出後、画像は `unannotated` から `completed` プールへ移動する（§6.1）。
+| 元の `pool` | 挙動 | レスポンス |
+|---|---|---|
+| `pending` | 画像を `submitted/images/` へ物理移動 + マスクを `submitted/labels/` に保存 | 200 `{ "status": "saved", "image_id": ..., "pool": "submitted" }` |
+| `submitted` | `submitted/labels/{id}` を上書き（再 submit） | 200 `{ "status": "updated", "image_id": ..., "pool": "submitted" }` |
+| `fixed` | 拒否 | 409 `{ "detail": "fixed pool is read-only" }` |
+| 不在 | 拒否 | 404 `{ "detail": "image not found" }` |
 
 ### 7.9 `GET /next?strategy=<random|uncertainty>` — 次のサンプル
+
+`pending` プールから次の HITL 対象を返す。`submitted` と `fixed` は学習用なので候補に含めない。
 
 クエリパラメータ:
 - `strategy`: 省略時 `random`。サーバー実装は最低でも `random` を提供する。`uncertainty` 等は任意拡張。
 
-レスポンス 200（プールが空でない場合）:
+レスポンス 200（pending が空でない場合）:
 ```json
 {
   "image_id": "0_celeb_crop_celeb.jpg",
-  "pool": "unannotated",
+  "pool": "pending",
   "has_seed": true,
   "has_annotation": false,
   "bytes": 10844,
@@ -305,7 +336,7 @@
 }
 ```
 
-レスポンス 200（プールが空の場合）:
+レスポンス 200（pending が空の場合）:
 ```json
 { "image_id": null }
 ```
@@ -427,6 +458,12 @@
 6. **`/status` は idle 時に `{"state": "idle"}` のみ返してよい**。訓練中は §7.12 の optional フィールドを詰める。
 7. **`/models/latest` レスポンスヘッダ `X-Model-Md5` を必ず付ける**。クライアントの差分同期はこれに依存する。
 8. **CORS ヘッダを付ける**（iPad アプリ以外のクライアント想定なら）。
+9. **3 プールの物理分離を厳守する**:
+   - `pending/{images,labels}/`、`submitted/{images,labels}/`、`fixed/{images,labels}/` の 3 ディレクトリ階層。
+   - `PUT /submit/{id}` は **`pending → submitted` への物理移動**を行う（コピーではなく `os.rename` 等）。pending/labels/ にあった seed は破棄。
+   - `submitted` への再 submit は `submitted/labels/{id}` の上書きのみ。画像は移動しない。
+   - **`fixed/` への書き込みは API では行わない**。サーバー設置者が手動で配置する read-only ディレクトリ。
+   - 学習データ取得時、`pending` の seed label は **絶対に学習に含めない**。
 
 ---
 
@@ -447,8 +484,10 @@ curl -s -X POST "$BASE/config" \
     "num_classes": 7
   }' | jq
 
-# 未提出画像の一覧
-curl -s "$BASE/images?pool=unannotated" | jq '.count'
+# HITL 前画像の一覧 / HITL 後画像の一覧 / 固定データの一覧
+curl -s "$BASE/images?pool=pending"   | jq '.count'
+curl -s "$BASE/images?pool=submitted" | jq '.count'
+curl -s "$BASE/images?pool=fixed"     | jq '.count'
 
 # 次の推奨サンプル
 curl -s "$BASE/next" | jq
@@ -474,6 +513,7 @@ curl -s -o latest_model.zip "$BASE/models/latest"
 | バージョン | 日付 | 変更点 |
 |---|---|---|
 | 1.0 | 2026-04-29 | 初版。多クラス対応、palette クライアント所有、エラー形式統一、`protocol_version` 導入、`/config` 追加、`/status` の metric 抽象化、`/models/latest` のヘッダベース MD5 同期。 |
+| 1.0 (rev) | 2026-04-29 | プール定義を 2 段（`unannotated/completed`）から 3 段（`pending/submitted/fixed`）に再編。`pending` は HITL 前で seed label を任意で持てるが学習には使わない。`submitted` は HITL 後・再編集可・学習対象。`fixed` は read-only の固定データセット・学習対象。`PUT /submit/{id}` は元プールに応じて物理移動 / 上書き / 拒否を分岐。`/info.counts` を 3 フィールドに、`/labels/{id}/download` の検索順を `submitted → fixed → pending` に、`/next` を `pending` プールのみから候補抽出。**PeriorbitAI 側へ移植前のため protocol_version は 1.0 のまま破壊改訂**。 |
 
 ---
 

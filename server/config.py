@@ -1,6 +1,12 @@
 """
-全体設定を一箇所に集約
-パス・ハイパーパラメータの変更はここだけ
+全体設定を一箇所に集約。
+パス・ハイパーパラメータの変更はここだけ。
+
+データ構造（protocol v1.0、3 プール）:
+  data/
+    pending/    {images,labels}/   ← HITL 前。学習×。labels は任意の seed
+    submitted/  {images,labels}/   ← HITL 後。学習○。再 submit で上書き
+    fixed/      {images,labels}/   ← 固定データ。read-only。学習○
 """
 import os
 
@@ -8,13 +14,23 @@ import os
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-# images_completed: アノテーション完了済み学習データ（read-only）
-COMPLETED_IMAGES_DIR = os.path.join(DATA_DIR, "images_completed", "images")
-COMPLETED_ANNOTATIONS_DIR = os.path.join(DATA_DIR, "images_completed", "annotations")
+# pending: HITL 前。labels は任意の seed（学習には使わない）
+PENDING_IMAGES_DIR = os.path.join(DATA_DIR, "pending", "images")
+PENDING_LABELS_DIR = os.path.join(DATA_DIR, "pending", "labels")
 
-# images_unannotated: アノテーション対象データ（iPadから書き込み）
-UNANNOTATED_IMAGES_DIR = os.path.join(DATA_DIR, "images_unannotated", "images")
-UNANNOTATED_ANNOTATIONS_DIR = os.path.join(DATA_DIR, "images_unannotated", "annotations")
+# submitted: iPad の PUT /submit で確定したもの。再編集可、学習対象。
+SUBMITTED_IMAGES_DIR = os.path.join(DATA_DIR, "submitted", "images")
+SUBMITTED_LABELS_DIR = os.path.join(DATA_DIR, "submitted", "labels")
+
+# fixed: 完成済の learning set。HITL 不要、read-only、学習対象。
+FIXED_IMAGES_DIR = os.path.join(DATA_DIR, "fixed", "images")
+FIXED_LABELS_DIR = os.path.join(DATA_DIR, "fixed", "labels")
+
+# 旧定数の互換エイリアス（scripts/ の import を壊さないため。新規コードでは使わない）
+UNANNOTATED_IMAGES_DIR = PENDING_IMAGES_DIR
+UNANNOTATED_ANNOTATIONS_DIR = PENDING_LABELS_DIR
+COMPLETED_IMAGES_DIR = FIXED_IMAGES_DIR
+COMPLETED_ANNOTATIONS_DIR = FIXED_LABELS_DIR
 
 MODELS_DIR = os.path.join(DATA_DIR, "models")
 PYTORCH_DIR = os.path.join(MODELS_DIR, "pytorch")
@@ -22,7 +38,7 @@ COREML_DIR = os.path.join(MODELS_DIR, "coreml")
 PRETRAINED_PATH = os.path.join(PYTORCH_DIR, "pretrained.pt")
 CURRENT_PT_DIR = os.path.join(PYTORCH_DIR, "current_pt")
 VERSIONS_DIR = os.path.join(PYTORCH_DIR, "versions")
-BEST_MODEL_PATH = os.path.join(CURRENT_PT_DIR, "best.pt")  # ベストfold（CoreML変換・フォールバック用）
+BEST_MODEL_PATH = os.path.join(CURRENT_PT_DIR, "best.pt")
 COREML_PATH = os.path.join(COREML_DIR, "SegmentationModel.mlpackage")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 LOG_DIR = os.path.join(BASE_DIR, "logs")
@@ -50,15 +66,18 @@ IMAGENET_STD = [0.229, 0.224, 0.225]
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 8000
 
+
 # === ヘルパー関数 ===
 def get_fold_model_path(fold_idx: int) -> str:
     """fold_idx番目のfoldモデルのパスを返す（current_pt/ 内）"""
     return os.path.join(CURRENT_PT_DIR, f"fold_{fold_idx}.pt")
 
+
 # === ディレクトリ自動作成 ===
 for d in [
-    COMPLETED_IMAGES_DIR, COMPLETED_ANNOTATIONS_DIR,
-    UNANNOTATED_IMAGES_DIR, UNANNOTATED_ANNOTATIONS_DIR,
+    PENDING_IMAGES_DIR, PENDING_LABELS_DIR,
+    SUBMITTED_IMAGES_DIR, SUBMITTED_LABELS_DIR,
+    FIXED_IMAGES_DIR, FIXED_LABELS_DIR,
     PYTORCH_DIR, CURRENT_PT_DIR, VERSIONS_DIR, COREML_DIR, STATIC_DIR, LOG_DIR,
 ]:
     os.makedirs(d, exist_ok=True)

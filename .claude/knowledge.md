@@ -65,6 +65,23 @@
   palette は iPad 側が真、`POST /config` でサーバーに伝える方式
 - アンチエイリアスや色補間が混入すると palette 逆引きが壊れるので、リサイズは必ず最近傍補間
 
+### プール定義は「label の有無」でなく「ライフサイクル段階」で分ける
+- 旧 2 プール設計（`unannotated` / `completed`）は「label の有無」を間接的に状態の代わりに使っていた
+  → 「初期画像に既に label がある（参考用）」というケースを表現できず破綻
+- 新 3 プール設計（`pending` / `submitted` / `fixed`）は **画像のライフサイクル段階** で物理ディレクトリを分離
+  - `pending`: HITL 前。label を持っていても seed 扱い。学習に含めない
+  - `submitted`: HITL 後。iPad の Submit で確定したもの。再 submit で上書き、学習対象
+  - `fixed`: 完成済み learning set。read-only、HITL 不要、学習対象
+- 教訓: **「フラグの組み合わせで状態を表現する」より「物理ディレクトリで分離する」**方が、
+  運用時に `ls` で状態が見え、誤操作のリスクも減る
+- `PUT /submit/{id}` は元プールに応じて挙動分岐（pending→移動、submitted→上書き、fixed→409）。
+  「同じエンドポイントが文脈で違う動きをする」のは API として一見複雑だが、クライアント実装は単純（呼ぶだけ）
+
+### `protocol_version` の運用ポリシー
+- 仕様策定中（≒最初の完全実装が動き出す前）の破壊変更は、minor up より **同じバージョンの内容を上書き** が望ましい
+- 「この仕様は v1.0 です」と公表してから別実装が現れた後の変更は、必ず minor/major up が必要
+- 変更履歴セクションに `1.0 / 1.0 (rev) / 1.1` のように内訳を残せば、移植側は「自分は rev 適用済か」を見て判断できる
+
 ## ZIPFoundation
 - SPM: `https://github.com/weichsel/ZIPFoundation` from "0.9.19"
 - `FileManager.unzipItem(at:to:)` で ZIP 展開
