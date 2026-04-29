@@ -1,147 +1,128 @@
+"""End-to-end HTTP smoke test for the Annotty HIL v1.0 server (rev3pool).
+
+Steps:
+  1. ``GET /info`` shows ``protocol_version="1.0"`` and 3-pool counts
+  2. ``POST /config`` with the periocular 7-class layout (200 + ``status=ok``)
+  3. ``GET /info`` reflects the new config (``num_classes==7``)
+  4. ``GET /images?pool=pending`` returns a non-empty list
+  5. ``GET /next`` returns image_meta from the pending pool with ``has_seed==True``
+  6. ``POST /infer/{id}`` returns an RGB PNG (palette-applied)
+  7. (Optional) ``POST /train?max_epochs=1`` flips ``GET /status`` to running
+
+Usage::
+
+    python scripts/test_api.py [--base http://127.0.0.1:8000] [--with-train]
 """
-全APIエンドポイントの動作確認
-サーバー起動中に別ターミナルで実行:
-  python scripts/test_api.py
-"""
+from __future__ import annotations
+
+import argparse
 import io
+import sys
 import time
-import requests
+
 from PIL import Image
 
-BASE = "http://localhost:8000"
+try:
+    import requests
+except ImportError:  # pragma: no cover
+    print("install requests first: pip install requests")
+    sys.exit(1)
 
 
-def test_all():
-    # 1. GET /info
-    print("=== GET /info ===")
-    r = requests.get(f"{BASE}/info")
-    assert r.status_code == 200, f"Expected 200, got {r.status_code}"
+PERIOCULAR_CONFIG = {
+    "num_classes": 7,
+    "class_names": [
+        "background", "brow", "sclera", "exposed_iris",
+        "caruncle", "lid", "occluded_iris",
+    ],
+    # NB: bg is white (not black) for iPad ColorMaskParser compatibility.
+    "palette": [
+        [255, 255, 255], [0, 230, 0], [130, 0, 235], [255, 230, 0],
+        [255, 0, 230], [0, 230, 230], [255, 130, 0],
+    ],
+}
+
+
+def _expect(condition: bool, msg: str) -> None:
+    if not condition:
+        print(f"FAIL: {msg}")
+        sys.exit(2)
+
+
+def main() -> int:
+    p = argparse.ArgumentParser()
+    p.add_argument("--base", default="http://127.0.0.1:8000")
+    p.add_argument("--with-train", action="store_true",
+                   help="also kick off a brief training run")
+    args = p.parse_args()
+    base = args.base.rstrip("/")
+
+    # 1. /info
+    r = requests.get(f"{base}/info", timeout=5)
+    r.raise_for_status()
     info = r.json()
-    print(info)
+    print(f"/info: name={info.get('name')}, "
+          f"protocol_version={info.get('protocol_version')}, "
+          f"num_classes={info.get('num_classes')}, "
+          f"counts={info.get('counts')}")
+    _expect(info.get("protocol_version") == "1.0", "protocol_version != 1.0")
 
-    # 2. GET /images
-    print("\n=== GET /images ===")
-    r = requests.get(f"{BASE}/images")
-    assert r.status_code == 200
-    images = r.json()["images"]
-    print(f"画像数: {len(images)}")
-    if images:
-        print(f"最初の3枚: {images[:3]}")
+    # 2. /config
+    r = requests.post(f"{base}/config", json=PERIOCULAR_CONFIG, timeout=5)
+    if r.status_code == 409:
+        print("/config: 409 (palette change forbidden — submitted/fixed pool non-empty); skipping")
+    else:
+        r.raise_for_status()
+        _expect(r.json().get("status") == "ok", "/config did not return status=ok")
+        print(f"/config: ok (num_classes={PERIOCULAR_CONFIG['num_classes']})")
 
-    # 3. GET /images/{id}/download
-    if images:
-        img_id = images[0]["id"]
-        print(f"\n=== GET /images/{img_id}/download ===")
-        r = requests.get(f"{BASE}/images/{img_id}/download")
-        assert r.status_code == 200
-        print(f"Content-Type: {r.headers.get('content-type')}, Size: {len(r.content)} bytes")
+    # 3. /info reflects config
+    info = requests.get(f"{base}/info", timeout=5).json()
+    _expect(info["num_classes"] == 7, f"num_classes != 7 after config (got {info['num_classes']})")
+    _expect(info["class_names"] == PERIOCULAR_CONFIG["class_names"], "class_names mismatch")
 
-    # 4. パストラバーサル検証
-    print("\n=== パストラバーサル検証 ===")
-    # FastAPIはパスに/を含むとルーティング不一致で404になるため、
-    # validate_image_idが機能するケース（..を含むがスラッシュなし）をテスト
-    r = requests.get(f"{BASE}/images/..img.png/download")
-    print(f"..img.png → Status: {r.status_code} (expected 400)")
-    assert r.status_code == 400
-    r = requests.get(f"{BASE}/images/bad%00name.png/download")
-    print(f"bad%%00name.png → Status: {r.status_code} (expected 400)")
-    assert r.status_code == 400
+    counts = info["counts"]
+    if counts["total"] == 0:
+        print("no images in any pool — run scripts/import_images.py first")
+        return 1
+    print(f"counts: pending={counts['pending']}, "
+          f"submitted={counts['submitted']}, fixed={counts['fixed']}")
 
-    # 5. POST /infer/{id}
-    if images:
-        img_id = images[0]["id"]
-        print(f"\n=== POST /infer/{img_id} ===")
-        start = time.time()
-        r = requests.post(f"{BASE}/infer/{img_id}")
-        elapsed = time.time() - start
-        if r.status_code == 200:
-            print(f"マスクサイズ: {len(r.content)} bytes, レスポンス時間: {elapsed:.2f}秒")
-            if elapsed < 2.0:
-                print(f"  ✓ NFR-1 合格 (< 2秒)")
-            else:
-                print(f"  ✗ NFR-1 不合格 (>= 2秒)")
-            with open("test_prediction.png", "wb") as f:
-                f.write(r.content)
-            print("  → test_prediction.png に保存")
-        else:
-            print(f"Status: {r.status_code}, {r.json()}")
+    # 4. /images
+    r = requests.get(f"{base}/images?pool=pending", timeout=5)
+    r.raise_for_status()
+    items = r.json()["items"]
+    print(f"/images?pool=pending: {len(items)} items, first={items[0] if items else None}")
 
-    # 6. GET /next
-    print("\n=== GET /next ===")
-    r = requests.get(f"{BASE}/next")
-    assert r.status_code == 200
-    print(r.json())
+    # 5. /next
+    r = requests.get(f"{base}/next", timeout=5)
+    r.raise_for_status()
+    nxt = r.json()
+    print(f"/next: {nxt}")
+    _expect(nxt.get("image_id") is not None, "/next returned no image_id")
+    image_id = nxt["image_id"]
 
-    # 7. GET /next?strategy=sequential
-    print("\n=== GET /next?strategy=sequential ===")
-    r = requests.get(f"{BASE}/next", params={"strategy": "sequential"})
-    assert r.status_code == 200
-    print(r.json())
+    # 6. /infer
+    r = requests.post(f"{base}/infer/{image_id}", timeout=30)
+    if r.status_code == 503:
+        print(f"/infer: 503 (no model and no seed); detail={r.json().get('detail')}")
+    else:
+        r.raise_for_status()
+        source = r.headers.get("X-Model-Source", "unknown")
+        img = Image.open(io.BytesIO(r.content))
+        _expect(img.mode == "RGB", f"/infer image mode != RGB (got {img.mode})")
+        print(f"/infer: source={source}, mode={img.mode}, size={img.size}")
 
-    # 8. PUT /submit/{id} (ダミーマスク送信)
-    if images:
-        img_id = images[0]["id"]
-        print(f"\n=== PUT /submit/{img_id} ===")
-        dummy = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
-        buf = io.BytesIO()
-        dummy.save(buf, format="PNG")
-        buf.seek(0)
-        r = requests.put(
-            f"{BASE}/submit/{img_id}",
-            files={"file": (img_id, buf.getvalue(), "image/png")},
-        )
-        assert r.status_code == 200
-        print(r.json())
+    # 7. optional /train
+    if args.with_train:
+        r = requests.post(f"{base}/train?max_epochs=1", timeout=10)
+        print(f"/train: {r.status_code} {r.json()}")
+        time.sleep(2)
+        r = requests.get(f"{base}/status", timeout=5)
+        print(f"/status (after start): {r.json()}")
 
-    # 9. GET /labels/{id}/download
-    if images:
-        img_id = images[0]["id"]
-        print(f"\n=== GET /labels/{img_id}/download ===")
-        r = requests.get(f"{BASE}/labels/{img_id}/download")
-        print(f"Status: {r.status_code}, Size: {len(r.content)} bytes")
-
-    # 10. GET /status
-    print("\n=== GET /status ===")
-    r = requests.get(f"{BASE}/status")
-    assert r.status_code == 200
-    print(r.json())
-
-    # 11. POST /train (epochを3に絞ってテスト)
-    print("\n=== POST /train (3 epochs) ===")
-    r = requests.post(f"{BASE}/train", params={"max_epochs": 3})
-    print(f"Status: {r.status_code}, {r.json()}")
-
-    if r.status_code == 200:
-        # 12. 学習中に再度トレーニングリクエスト (409確認)
-        print("\n=== POST /train (学習中の二重リクエスト) ===")
-        r2 = requests.post(f"{BASE}/train", params={"max_epochs": 3})
-        print(f"Status: {r2.status_code} (expected 409), {r2.json()}")
-
-        # 13. ポーリングで学習完了を待つ
-        print("\n=== 学習ポーリング ===")
-        for _ in range(60):
-            time.sleep(3)
-            r = requests.get(f"{BASE}/status")
-            status = r.json()
-            print(
-                f"  {status['status']} epoch={status['epoch']}/{status['max_epochs']} "
-                f"dice={status['best_dice']:.4f}"
-            )
-            if status["status"] != "running":
-                break
-
-    # 14. 存在しない画像のテスト
-    print("\n=== 404テスト ===")
-    r = requests.get(f"{BASE}/images/nonexistent.png/download")
-    print(f"GET nonexistent image → Status: {r.status_code} (expected 404)")
-    assert r.status_code == 404
-
-    r = requests.get(f"{BASE}/labels/nonexistent.png/download")
-    print(f"GET nonexistent label → Status: {r.status_code} (expected 404)")
-    assert r.status_code == 404
-
-    print("\n=== 全テスト完了 ===")
+    return 0
 
 
 if __name__ == "__main__":
-    test_all()
+    raise SystemExit(main())

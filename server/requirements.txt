@@ -1,9 +1,21 @@
+# Web stack
 fastapi>=0.115.0
 uvicorn[standard]>=0.34.0
 python-multipart>=0.0.9
-torch>=2.5.0
-torchvision>=0.20.0
-segmentation-models-pytorch>=0.3.0
+
+# DL stack
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.4.1
+torchvision==0.19.1
+segmentation-models-pytorch>=0.3.4
+
+# Image / data
 Pillow>=11.0.0
-numpy>=1.26.0
-coremltools>=8.0
+numpy>=1.26.0,<2.0
+opencv-python>=4.9.0
+albumentations>=1.4.0
+scikit-learn>=1.4.0
+tqdm>=4.66.0
+
+# Config / IO
+pyyaml>=6.0
