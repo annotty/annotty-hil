@@ -155,16 +155,9 @@ class HILViewModel: ObservableObject {
                 try imageData.write(to: tempURL)
                 canvasVM.importImage(from: tempURL)
 
-                // If the image has a label on the server, download and save as annotation
-                if let imageInfo = imageList.first(where: { $0.id == imageId }), imageInfo.hasLabel {
-                    let labelData = try await client.downloadLabel(imageId: imageId)
-                    // Find the imported image URL in the project
-                    let imageURLs = ProjectFileService.shared.getImageURLs()
-                    if let imageURL = imageURLs.first(where: { $0.lastPathComponent == imageId }) {
-                        try ProjectFileService.shared.saveAnnotation(labelData, for: imageURL)
-                        print("[HIL] Import: saved label for \(imageId)")
-                    }
-                }
+                // Pull seed/label per protocol §7.6 (submitted → fixed → pending).
+                // Tolerant of 404 (no label on any pool).
+                await fetchAndSaveLabelIfAvailable(imageId: imageId)
 
                 lastImportedId = imageId
                 print("[HIL] Import: \(imageId) imported")
@@ -252,6 +245,11 @@ class HILViewModel: ObservableObject {
                 try imageData.write(to: tempURL)
                 canvasVM.importImage(from: tempURL)
 
+                // Pull seed/label per protocol §7.6, then re-navigate so the
+                // canvas re-reads the freshly-saved annotation from disk.
+                await fetchAndSaveLabelIfAvailable(imageId: imageId)
+                _ = canvasVM.navigateToImage(named: imageId)
+
                 print("[HIL] Image \(imageId) downloaded and loaded")
             }
         } catch {
@@ -305,6 +303,25 @@ class HILViewModel: ObservableObject {
 
     private func updateBaseURL() async {
         await client.updateSettings(baseURL: settings.serverURL, apiKey: settings.apiKey)
+    }
+
+    /// Fetch the label/seed for `imageId` from the server (per protocol §7.6:
+    /// submitted → fixed → pending priority) and save it as the project
+    /// annotation. 404 means no label on any pool — normal for unseeded
+    /// pending images, so we silently skip. Other errors are logged but not
+    /// propagated since the image itself has already loaded successfully.
+    private func fetchAndSaveLabelIfAvailable(imageId: String) async {
+        do {
+            let labelData = try await client.downloadLabel(imageId: imageId)
+            guard let imageURL = ProjectFileService.shared.getImageURLs()
+                .first(where: { $0.lastPathComponent == imageId }) else { return }
+            try ProjectFileService.shared.saveAnnotation(labelData, for: imageURL)
+            print("[HIL] Saved label/seed for \(imageId)")
+        } catch HILError.serverError(statusCode: 404, message: _) {
+            // No label on any pool. Expected for fresh pending images.
+        } catch {
+            print("[HIL] Label fetch failed for \(imageId): \(error)")
+        }
     }
 
     /// Clear errorMessage after 5 seconds
