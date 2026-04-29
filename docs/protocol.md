@@ -25,7 +25,7 @@
 | **Image** | アノテーション対象の入力画像（JPEG または PNG） |
 | **Mask** | クラスIDをピクセル単位で表すアノテーション。本プロトコルでは RGB PNG として伝送 |
 | **Class** | セグメンテーションの分類。クラス ID は `0..num_classes-1` の整数 |
-| **Class 0 (background)** | 背景クラス。慣習的に「塗らない」領域に対応する。マスク PNG では `(0, 0, 0)` |
+| **Class 0 (background)** | 背景クラス。慣習的に「塗らない」領域に対応する。マスク PNG では `(255, 255, 255)` |
 | **Palette** | クラス ID → RGB 色 のマッピング。`palette[i] = [R, G, B]`、長さ `num_classes` |
 | **Pool** | 画像の状態カテゴリ。`pending`（HITL 前）/ `submitted`（HITL 後）/ `fixed`（固定データ）の 3 種 |
 | **Seed** | `pending` プールに置かれている任意の参考 label。クライアントがそれを編集してアノテーション完成形にする。学習には使わない |
@@ -81,20 +81,24 @@
 ### 5.1 マスク（Mask）
 
 - **MIME**: `image/png`
-- **形式**: RGB PNG（3 チャンネル、α なし）
+- **形式**: RGB PNG（3 チャンネル、α なし）または RGBA PNG（4 チャンネル、α は無視）
 - **サイズ**: 入力画像と同じピクセル数
 - **色の意味**: 各画素の `(R, G, B)` がいずれかの `palette[i]` と一致するクラス `i` を表す
-- **背景の扱い**: クラス 0（background）は **塗らない**。マスク PNG 上では `(0, 0, 0)` のまま残る
-- **未塗布領域**: `(0, 0, 0)` は「クラス 0 にアサイン済み」と「未編集」を区別しない。実用上はどちらも背景として扱う
+- **背景の扱い**: クラス 0（background）は **塗らない**。マスク PNG 上では `(255, 255, 255)` (白) のまま残る
+- **未塗布領域**: `(255, 255, 255)` は「クラス 0 にアサイン済み」と「未編集」を区別しない。実用上はどちらも背景として扱う
+- **ニアホワイト許容**: アンチエイリアス対策のため `(R, G, B)` の各成分が 250 以上の画素は背景とみなしてよい
 
-> **実装注意（サーバー側）**: 受信した RGB PNG をクラス ID 配列に変換するときは、各画素を palette と完全一致比較する（誤差なし）。アンチエイリアスや補間で中間色が出ないよう、クライアントは **必ず最近傍補間でリサイズし、PNG 圧縮以外の変換を経由しないこと**。
+> **実装注意（クライアント側）**: マスクをエクスポート／submit する際は、ピクセルバッファを白 (255, 255, 255) で初期化し、各クラスの palette 色だけを上書きする。アンチエイリアスや補間で中間色が出ないよう、**必ず最近傍補間でリサイズし、PNG 圧縮以外の変換を経由しないこと**。
+
+> **実装注意（サーバー側）**: 受信した RGB PNG をクラス ID 配列に変換するときは、各画素を palette と完全一致比較する（誤差なし）。後方互換のため、**legacy フォーマット（単一チャンネル grayscale PNG、各画素値 = クラス ID）の submit を受け付けてもよい**。受け付ける場合は内部的に palette を適用してから保存し、`/labels/{id}/download` では常に v1 仕様の RGB PNG を返すこと。
 
 ### 5.2 Palette
 
 - 形式: `[[R, G, B], [R, G, B], ...]`（外側の長さ = `num_classes`）
 - 値: 各成分 0–255 の整数
 - **所有権**: クライアント側が管理する。サーバーはクライアントから受け取って保持するだけで、勝手に決めない。
-- 同期手段: クライアントが `POST /config` で送信する（§7.10 参照）。
+- 同期手段: クライアントが `POST /config` で送信する（§7.10 参照）。`POST /config` を呼ばないクライアントもあり得る — その場合サーバーは内部規定の palette を使う。
+- **`palette[0]` の慣習**: 背景クラス。慣習的に `[255, 255, 255]` (白)。マスク PNG の未塗布領域がそのまま `palette[0]` と一致する。
 
 ### 5.3 画像（Image）
 
@@ -232,7 +236,7 @@
 リクエスト:
 ```json
 {
-  "palette": [[0,0,0],[0,230,0],[130,0,235],[255,230,0],[255,0,230],[0,230,230],[255,130,0]],
+  "palette": [[255,255,255],[0,230,0],[130,0,235],[255,230,0],[255,0,230],[0,230,230],[255,130,0]],
   "class_names": ["background","brow","sclera","exposed_iris","caruncle","lid","occluded_iris"],
   "num_classes": 7
 }
@@ -293,6 +297,8 @@
 
 レスポンス 200: `image/png`（§5.1 の RGB PNG）。
 404: マスクがどのプールにも存在しない。
+
+> **クライアント実装注意**: pool に依存せず、画像をローカルに取り込む際は **常にこのエンドポイントを試みること**。404 は「label がどのプールにもない」という正常系の合図なので静かに無視してよい（pending pool の seed を確実に取りこぼさないため）。`/info` の `counts.submitted + counts.fixed` や `/images?pool=submitted` で pre-filter すると pending の seed が永久に届かない。
 
 ### 7.7 `POST /infer/{image_id}` — 推論
 
@@ -434,14 +440,15 @@
 新規にクライアントを書く（または別言語に移植する）場合のチェックリスト：
 
 1. **接続時に `GET /info` を叩き、`protocol_version` の MAJOR を確認**。MAJOR 不一致なら接続を拒否すること。
-2. **起動時に `POST /config` で palette / class_names / num_classes を送る**。サーバー側にローカル設定を反映させる。
+2. **起動時に `POST /config` で palette / class_names / num_classes を送る**。サーバー側にローカル設定を反映させる。送らないクライアントもあり得る（その場合はサーバーの内部規定 palette が使われる）。
 3. **マスク I/O は §5.1 を厳守**。
-   - 送信時: ローカル palette でクラス ID 配列を RGB PNG に着色して PUT。
-   - 受信時: サーバーから来る RGB PNG を、ローカル palette で逆引きしてクラス ID 配列に変換。
+   - 送信時: ピクセルバッファを白 `(255, 255, 255)` で初期化し、各クラスの palette 色だけを上書きして RGB PNG として PUT。
+   - 受信時: サーバーから来る RGB PNG を、ローカル palette で逆引きしてクラス ID 配列に変換。`(255, 255, 255)` および ニアホワイト（各成分 ≥ 250）は背景として扱う。
 4. **エラーは `detail` を抽出**して UI に表示。
 5. **`/status` の optional フィールドは欠落・null 双方を許容**。
 6. **モデル同期は `model.md5` で差分判定**。同一 MD5 ならダウンロードしない。
 7. **`/images/{id}/download` の Content-Type が `image/jpeg` のことがある**（PNG 限定にしない）。
+8. **画像ダウンロード時は必ず `/labels/{id}/download` も試みる**。pool（pending / submitted / fixed）でフィルタせず、404 を握りつぶす。これを怠ると `pending` の seed label が永久に取りこぼされる（§7.6 参照）。
 
 ---
 
@@ -452,7 +459,9 @@
 1. **`GET /info` の `protocol_version` を必ず返す**。
 2. **`POST /config` でクライアントから palette を受け取り、内部状態として保持する**。
    - 起動直後は palette 未設定状態でよいが、その間は提出・推論を 503 で拒否する選択肢あり。
-3. **マスクは RGB PNG として保存・配信する**。内部的にクラス ID 配列で持つ場合、palette 逆引きで変換すること。
+   - クライアントが `POST /config` を一度も呼ばない場合に備えて、サーバー側にも内部規定の palette を持っておくこと。
+3. **マスクは背景 `(255, 255, 255)` の RGB PNG として保存・配信する**。内部的にクラス ID 配列で持つ場合、palette 逆引きで変換すること。
+   - **後方互換**: legacy クライアントが単一チャンネル grayscale PNG（各画素値 = クラス ID）を submit してきた場合、サーバーは palette を適用してから RGB PNG として保存してよい。`/labels/{id}/download` では常に v1 仕様の RGB PNG を返すこと。
 4. **エラーは `{"detail": "..."}` 形式に統一**。FastAPI なら `HTTPException(status_code=..., detail="...")` を投げれば自動でこの形式になる。
 5. **画像 ID のバリデーション**: パストラバーサル対策として `[A-Za-z0-9_\-\.]+\.(png|jpg|jpeg)` のみ許可する。
 6. **`/status` は idle 時に `{"state": "idle"}` のみ返してよい**。訓練中は §7.12 の optional フィールドを詰める。
@@ -479,7 +488,7 @@ curl -s "$BASE/info" | jq
 curl -s -X POST "$BASE/config" \
   -H "Content-Type: application/json" \
   -d '{
-    "palette": [[0,0,0],[0,230,0],[130,0,235],[255,230,0],[255,0,230],[0,230,230],[255,130,0]],
+    "palette": [[255,255,255],[0,230,0],[130,0,235],[255,230,0],[255,0,230],[0,230,230],[255,130,0]],
     "class_names": ["background","brow","sclera","exposed_iris","caruncle","lid","occluded_iris"],
     "num_classes": 7
   }' | jq
@@ -514,6 +523,7 @@ curl -s -o latest_model.zip "$BASE/models/latest"
 |---|---|---|
 | 1.0 | 2026-04-29 | 初版。多クラス対応、palette クライアント所有、エラー形式統一、`protocol_version` 導入、`/config` 追加、`/status` の metric 抽象化、`/models/latest` のヘッダベース MD5 同期。 |
 | 1.0 (rev) | 2026-04-29 | プール定義を 2 段（`unannotated/completed`）から 3 段（`pending/submitted/fixed`）に再編。`pending` は HITL 前で seed label を任意で持てるが学習には使わない。`submitted` は HITL 後・再編集可・学習対象。`fixed` は read-only の固定データセット・学習対象。`PUT /submit/{id}` は元プールに応じて物理移動 / 上書き / 拒否を分岐。`/info.counts` を 3 フィールドに、`/labels/{id}/download` の検索順を `submitted → fixed → pending` に、`/next` を `pending` プールのみから候補抽出。**PeriorbitAI 側へ移植前のため protocol_version は 1.0 のまま破壊改訂**。 |
+| 1.0 (rev2) | 2026-04-30 | 実装の事実に合わせて clarification。背景色を `(0, 0, 0)` 黒から `(255, 255, 255)` 白に変更（iPad の `ColorMaskParser` および `PNGExporter` がいずれも白を背景として扱う実装になっていたため）。`palette[0]` の慣習を白に明記。ニアホワイト許容（成分 ≥ 250）を §5.1 に追加。`POST /config` を呼ばないクライアントの存在を §5.2 / §8 / §9 に明記。サーバーは legacy 単一チャンネル grayscale PNG の submit を受け付けてよいと §5.1 / §9 に追記。`/labels/{id}/download` は pool に依存せず必ず試行し 404 を握りつぶすことをクライアント実装ガイド §8 に追加（pending seed の取りこぼし防止）。**互換破壊なし — 振る舞いは既存 iPad 実装の追認**。 |
 
 ---
 
