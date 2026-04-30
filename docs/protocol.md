@@ -82,7 +82,7 @@
 
 - **MIME**: `image/png`
 - **形式**: RGB PNG（3 チャンネル、α なし）または RGBA PNG（4 チャンネル、α は無視）
-- **サイズ**: 入力画像と同じピクセル数
+- **サイズ**: 入力画像と同じピクセル数を基本とするが、**整数倍にアップサンプリングしたサイズも許容**する。クライアント (iPad 等) が内部で高解像度マスクバッファを使う場合（iPad は `min(2.0, 4096/maxEdge)` 倍）、サーバーが事前にその解像度でマスクを送るとクライアント側の NEAREST upscale を回避でき、エッジが滑らかに見える（§9.10 参照）
 - **色の意味**: 各画素の `(R, G, B)` がいずれかの `palette[i]` と一致するクラス `i` を表す
 - **背景の扱い**: クラス 0（background）は **塗らない**。マスク PNG 上では `(255, 255, 255)` (白) のまま残る
 - **未塗布領域**: `(255, 255, 255)` は「クラス 0 にアサイン済み」と「未編集」を区別しない。実用上はどちらも背景として扱う
@@ -473,6 +473,27 @@
    - `submitted` への再 submit は `submitted/labels/{id}` の上書きのみ。画像は移動しない。
    - **`fixed/` への書き込みは API では行わない**。サーバー設置者が手動で配置する read-only ディレクトリ。
    - 学習データ取得時、`pending` の seed label は **絶対に学習に含めない**。
+10. **class-id ラベルをクライアントの内部マスク解像度で事前 render する（強く推奨）**: クライアント (iPad 等) が内部マスクバッファを高解像度で持つ場合、サーバーが 1× で送ると、クライアントは class-id データを **NEAREST でしかアップサンプリングできない**（bilinear/bicubic は中間値 = 存在しないクラスを生むため使えない）。NEAREST upscale は段数を維持して各段を倍に膨らませるだけで、ユーザには「ギザギザが荒すぎる」と知覚される。
+
+    解決: サーバーが iPad の `InternalMask.calculateDimensions` と同じ式でターゲット解像度を算出し、その解像度でマスクを送る。
+
+    ```
+    scale = min(2.0, 4096 / max(image_w, image_h))
+    target_w = int(image_w * scale)
+    target_h = int(image_h * scale)
+    ```
+
+    class-id データを安全に upscale する手順:
+    1. NEAREST で `(target_w, target_h)` に拡大
+    2. **各クラスの binary mask** に独立に Gaussian filter（σ ≈ 1.5 推奨）
+    3. クラス間で argmax を取って class-id を復元
+    4. PNG (mode=L または palette を適用した RGB) として保存
+
+    これにより 2D Gaussian が軸非整列の方向にも確率を漏らし、argmax で **新しい boundary 位置**が生成される。元の段数が 2 倍程度に増殖し、各段が 1 ピクセル相当になる。
+
+    - **bilinear/bicubic を素のクラス ID 配列に直接適用してはいけない**（中間値が生まれて壊れる）。Gaussian + argmax のみ class 安全。
+    - 限界: source 解像度が極端に低い画像（短辺 < 100px 等）では 2× 化しても情報量不足で改善は限定的。究極的には source の高解像度化が必要。
+    - 参考実装: [`server/scripts/smooth_labels.py`](../server/scripts/smooth_labels.py)。
 
 ---
 
@@ -524,6 +545,7 @@ curl -s -o latest_model.zip "$BASE/models/latest"
 | 1.0 | 2026-04-29 | 初版。多クラス対応、palette クライアント所有、エラー形式統一、`protocol_version` 導入、`/config` 追加、`/status` の metric 抽象化、`/models/latest` のヘッダベース MD5 同期。 |
 | 1.0 (rev) | 2026-04-29 | プール定義を 2 段（`unannotated/completed`）から 3 段（`pending/submitted/fixed`）に再編。`pending` は HITL 前で seed label を任意で持てるが学習には使わない。`submitted` は HITL 後・再編集可・学習対象。`fixed` は read-only の固定データセット・学習対象。`PUT /submit/{id}` は元プールに応じて物理移動 / 上書き / 拒否を分岐。`/info.counts` を 3 フィールドに、`/labels/{id}/download` の検索順を `submitted → fixed → pending` に、`/next` を `pending` プールのみから候補抽出。**PeriorbitAI 側へ移植前のため protocol_version は 1.0 のまま破壊改訂**。 |
 | 1.0 (rev2) | 2026-04-30 | 実装の事実に合わせて clarification。背景色を `(0, 0, 0)` 黒から `(255, 255, 255)` 白に変更（iPad の `ColorMaskParser` および `PNGExporter` がいずれも白を背景として扱う実装になっていたため）。`palette[0]` の慣習を白に明記。ニアホワイト許容（成分 ≥ 250）を §5.1 に追加。`POST /config` を呼ばないクライアントの存在を §5.2 / §8 / §9 に明記。サーバーは legacy 単一チャンネル grayscale PNG の submit を受け付けてよいと §5.1 / §9 に追記。`/labels/{id}/download` は pool に依存せず必ず試行し 404 を握りつぶすことをクライアント実装ガイド §8 に追加（pending seed の取りこぼし防止）。**互換破壊なし — 振る舞いは既存 iPad 実装の追認**。 |
+| 1.0 (rev3) | 2026-05-01 | class-id ラベルの事前 upscale ガイドラインを追加。§5.1 の「サイズ」を「画像と同じ or 整数倍 OK」に拡張。§9 に項目 10 を新設し、iPad の `InternalMask.calculateDimensions` と同じ式でターゲット解像度を算出して per-class Gaussian + argmax で事前 upscale する手順を明記。class-id データには bilinear/bicubic が使えない（中間値が生まれる）制約と、NEAREST だけでは段数が増えないため iPad 表示が blocky になる根本原因を文書化。参考実装として `server/scripts/smooth_labels.py` を追加。**互換破壊なし — 既存サーバーはそのままで動作するが、エッジの滑らかさが向上する**。 |
 
 ---
 
