@@ -78,9 +78,10 @@ struct CanvasContainerView: View {
 
                 // Smooth stroke path overlay
                 if !viewModel.smoothStrokePoints.isEmpty {
+                    let displayScale = viewModel.renderer?.contentScaleFactor ?? 1.0
                     SmoothStrokeOverlay(
                         points: viewModel.smoothStrokePoints,
-                        brushRadius: CGFloat(viewModel.brushRadius) * viewModel.currentScale
+                        brushRadius: CGFloat(viewModel.brushRadius) * viewModel.currentScale / displayScale
                     )
                     .allowsHitTesting(false)
                 }

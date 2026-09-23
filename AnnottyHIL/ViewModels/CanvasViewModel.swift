@@ -750,9 +750,12 @@ class CanvasViewModel: ObservableObject {
 
     // MARK: - Drawing
 
-    /// Brush preview size for UI (in screen coordinates, reflects actual drawn size)
+    /// Brush preview size for UI (in UIKit points, reflects actual drawn size).
+    /// brushRadius is in image pixels; currentScale converts to drawable pixels;
+    /// dividing by contentScaleFactor converts drawable pixels to UIKit points.
     var brushPreviewSize: CGFloat {
-        CGFloat(brushRadius) * 2 * currentScale
+        let displayScale = renderer?.contentScaleFactor ?? 1.0
+        return CGFloat(brushRadius) * 2 * currentScale / displayScale
     }
 
     /// Counter for throttling bbox expansion checks

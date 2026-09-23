@@ -222,11 +222,12 @@ class MetalRenderer: NSObject, ObservableObject {
         // Convert screen point to mask coordinates
         let maskPoint = canvasTransform.screenToMask(screenPoint)
 
-        // Brush radius in mask coordinates
-        // UI radius is in original image pixels, multiply by maskScaleFactor to get mask pixels
-        // Also multiply by contentScaleFactor to match the pixel-based coordinate system
-        // (touch points are converted to pixels, so radius must be too)
-        let adjustedRadius = radius * canvasTransform.maskScaleFactor * Float(contentScaleFactor)
+        // Brush radius in mask coordinates.
+        // UI radius is in original image pixels (slider value 1 = 1 image pixel),
+        // so we only multiply by maskScaleFactor to get mask pixels.
+        // Note: contentScaleFactor must NOT be applied — that factor is for converting
+        // touch point positions to pixels, but a radius is a length in image space.
+        let adjustedRadius = radius * canvasTransform.maskScaleFactor
 
         // Paint value: currentClassID when painting, 0 when erasing
         let paintValue: UInt8 = isPainting ? UInt8(currentClassID) : 0
@@ -279,9 +280,10 @@ class MetalRenderer: NSObject, ObservableObject {
             depth: 1
         )
 
-        // Brush radius in mask coordinates (UI "1" = 1 original image pixel)
-        // Multiply by contentScaleFactor to match pixel-based coordinate system
-        let adjustedRadius = radius * canvasTransform.maskScaleFactor * Float(contentScaleFactor)
+        // Brush radius in mask coordinates (UI "1" = 1 original image pixel).
+        // Only maskScaleFactor is applied; see applyStamp() for why contentScaleFactor
+        // is not used here.
+        let adjustedRadius = radius * canvasTransform.maskScaleFactor
 
         // Paint value: currentClassID when painting, 0 when erasing
         let paintValue: UInt8 = isPainting ? UInt8(currentClassID) : 0

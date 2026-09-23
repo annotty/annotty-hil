@@ -85,3 +85,14 @@
 ## ZIPFoundation
 - SPM: `https://github.com/weichsel/ZIPFoundation` from "0.9.19"
 - `FileManager.unzipItem(at:to:)` で ZIP 展開
+
+## 座標変換: 位置 vs 長さ
+- iPad Retina の `contentScaleFactor`（typically 2.0）は **タッチ位置（point）→ pixel** の変換に使う
+  - 例: `MetalRenderer.convertTouchToScreen` で `point * contentScaleFactor`
+- ブラシ半径のような **長さ・サイズ量** は元画像 pixel 単位で扱う場合、`contentScaleFactor` を掛けてはいけない
+  - マスク座標系への変換は `radius * maskScaleFactor` のみ
+  - 「タッチ位置を pixel に変換するから半径も pixel に変換すべき」という直感は誤り
+- SwiftUI のオーバーレイ（プレビュー円・SmoothStrokeOverlay）は UIKit point 単位
+  - 元画像 pixel → drawable pixel: `* currentScale`（matrix の scale）
+  - drawable pixel → UIKit point: `/ contentScaleFactor`
+  - したがって元画像 pixel → UIKit point は `* currentScale / contentScaleFactor`
