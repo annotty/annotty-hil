@@ -34,7 +34,7 @@ class HILViewModel: ObservableObject {
 
     // MARK: - Connection
 
-    /// Connect to server and fetch image list
+    /// Connect to server, register the local palette, and fetch image list.
     func connect() async {
         guard settings.isConfigured else { return }
         await updateBaseURL()
@@ -45,6 +45,8 @@ class HILViewModel: ObservableObject {
             let info = try await client.getInfo()
             serverInfo = info
             isConnected = true
+
+            await registerConfig(info: info)
 
             let response = try await client.listImages()
             imageList = response.images
@@ -300,6 +302,31 @@ class HILViewModel: ObservableObject {
     }
 
     // MARK: - Private Helpers
+
+    /// Send the palette to the server (protocol §7.2).
+    /// Class names/count come from the server (`/info`); colors come from the
+    /// iPad palette by index (class N ↔ `maskPalette[N-1]`). No user setup needed.
+    /// Failure is non-fatal: the server falls back to its own palette.
+    private func registerConfig(info: HILServerClient.ServerInfo) async {
+        let foregroundCount = info.numClasses - 1
+        guard foregroundCount >= 1, foregroundCount <= CanvasViewModel.maskPalette.count else {
+            errorMessage = "サーバーのクラス数 (\(info.numClasses)) に iPad が対応していません"
+            return
+        }
+        let palette = [[255, 255, 255]] + CanvasViewModel.maskPalette.prefix(foregroundCount)
+
+        do {
+            let response = try await client.postConfig(
+                palette: palette, classNames: info.classNames, numClasses: info.numClasses)
+            print("[HIL] Config: registered \(info.classNames)")
+            if let warning = response.warning {
+                errorMessage = "パレット未反映: \(warning)"
+            }
+        } catch {
+            errorMessage = "パレット登録に失敗: \(error.localizedDescription)"
+            print("[HIL] Config: ERROR \(error)")
+        }
+    }
 
     private func updateBaseURL() async {
         await client.updateSettings(baseURL: settings.serverURL, apiKey: settings.apiKey)

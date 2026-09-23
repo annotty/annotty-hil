@@ -104,6 +104,12 @@ class CanvasViewModel: ObservableObject {
         }
     }
 
+    /// Mask RGB colors for class 1-8 (index 0 = class 1), as `[R, G, B]`.
+    /// Sent to the HIL server via `POST /config` so both sides share one palette.
+    static var maskPalette: [[Int]] {
+        classRGBColors.map { [Int($0.0), Int($0.1), Int($0.2)] }
+    }
+
     /// UserDefaults key for class names
     private static let classNamesKey = "annotty.classNames"
 
@@ -1841,8 +1847,8 @@ class CanvasViewModel: ObservableObject {
         applyUNetMask(binaryMask, size: CGSize(width: sourceWidth, height: sourceHeight))
     }
 
-    /// Export current mask as 512×512 RGBA PNG for server submission
-    /// classID > 0 → red (255,0,0,255), classID == 0 → transparent (0,0,0,0)
+    /// Export current mask as a palette-colored PNG for server submission (protocol §5.1):
+    /// source-image size, white background, each class in its `maskPalette` color
     func exportMaskForServer() -> Data? {
         guard let textureManager = renderer?.textureManager,
               let maskData = textureManager.readMask() else {
@@ -1850,50 +1856,22 @@ class CanvasViewModel: ObservableObject {
             return nil
         }
 
-        let srcWidth = Int(textureManager.maskSize.width)
-        let srcHeight = Int(textureManager.maskSize.height)
-        let dstWidth = 512
-        let dstHeight = 512
-
-        // Create RGBA buffer
-        var rgba = [UInt8](repeating: 0, count: dstWidth * dstHeight * 4)
-
-        let scaleX = Float(srcWidth) / Float(dstWidth)
-        let scaleY = Float(srcHeight) / Float(dstHeight)
-
-        for y in 0..<dstHeight {
-            for x in 0..<dstWidth {
-                let srcX = min(Int(Float(x) * scaleX), srcWidth - 1)
-                let srcY = min(Int(Float(y) * scaleY), srcHeight - 1)
-                let srcIdx = srcY * srcWidth + srcX
-                let dstIdx = (y * dstWidth + x) * 4
-
-                if maskData[srcIdx] > 0 {
-                    rgba[dstIdx]     = 255  // R
-                    rgba[dstIdx + 1] = 0    // G
-                    rgba[dstIdx + 2] = 0    // B
-                    rgba[dstIdx + 3] = 255  // A
-                }
-                // else: remains all zeros (transparent)
-            }
-        }
-
-        // Convert to PNG via CGContext → CGImage → UIImage
-        guard let context = CGContext(
-            data: &rgba,
-            width: dstWidth,
-            height: dstHeight,
-            bitsPerComponent: 8,
-            bytesPerRow: dstWidth * 4,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ),
-              let cgImage = context.makeImage() else {
-            print("[HIL] Failed to create PNG context")
+        // Protocol §5.1: same size as the source image, white background, class colors
+        let imageWidth = Int(textureManager.imageSize.width)
+        let imageHeight = Int(textureManager.imageSize.height)
+        guard imageWidth > 0, imageHeight > 0 else {
+            print("[HIL] Image size unknown, cannot export mask")
             return nil
         }
 
-        return UIImage(cgImage: cgImage).pngData()
+        let resized = resizeMask(
+            maskData,
+            fromWidth: Int(textureManager.maskSize.width),
+            fromHeight: Int(textureManager.maskSize.height),
+            toWidth: imageWidth,
+            toHeight: imageHeight
+        )
+        return createColoredPNG(from: resized, width: imageWidth, height: imageHeight, color: annotationColor)
     }
 
     // MARK: - Smooth Stroke Handling

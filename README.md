@@ -2,6 +2,9 @@
 
 **iPad annotation app with Human-in-the-Loop active learning for medical image segmentation.**
 
+> **Building a server for this app?** Read [`protocol/`](protocol/) first — it contains the
+> spec and a conformance test. [`server/`](server/) is the reference implementation.
+
 Annotty HIL combines on-device AI inference (CoreML) with server-side training to create a fast, iterative annotation workflow. Designed for retinal fundus vessel segmentation, but adaptable to any binary/multi-class segmentation task.
 
 ## The Problem
@@ -95,24 +98,15 @@ Open `AnnottyHIL.xcodeproj` in Xcode, select your iPad, and run.
 
 ### 2. Server (Windows/Mac/Linux)
 
+The iPad app talks to any server that implements [`protocol/`](protocol/).
+The bundled reference server is in [`server/`](server/) — see its README for setup.
+
 ```bash
 cd server
 pip install -r requirements.txt
-```
-
-#### Start with Cloudflare Tunnel (recommended)
-
-```bash
-# Install cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/
-python main.py
-```
-
-This starts the FastAPI server and a Cloudflare quick tunnel. Copy the displayed `https://xxxx.trycloudflare.com` URL.
-
-#### Start without tunnel (local network only)
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+python -m uvicorn main:app --host 0.0.0.0 --port 8000
+# expose it over HTTPS (copy the printed https://xxxx.trycloudflare.com URL)
+cloudflared tunnel --url http://localhost:8000
 ```
 
 ### 3. Connect iPad to Server
@@ -130,18 +124,9 @@ Load image from server → AI Predict → Fix with brush → Submit → Next ima
                                             When ready → Train
 ```
 
-## API Endpoints
+## API
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/info` | Server status (image count, training status) |
-| GET | `/images` | List all images |
-| GET | `/images/{id}/download` | Download image |
-| PUT | `/submit/{id}` | Upload annotation mask |
-| POST | `/train` | Start model training |
-| POST | `/train/cancel` | Cancel ongoing training |
-| GET | `/status` | Training progress |
-| GET | `/next` | Next recommended image (active learning) |
+See [`protocol/protocol.md`](protocol/protocol.md).
 
 ## Project Structure
 
@@ -154,7 +139,8 @@ annotty-hil/
 │   │   └── UNet/Models/        # CoreML models (Git LFS)
 │   ├── ViewModels/             # App state & logic
 │   └── Views/                  # SwiftUI views
-├── server/                     # FastAPI server (Python)
+├── protocol/                   # Client ⇄ server spec + conformance test (start here for servers)
+├── server/                     # Reference server (Python / FastAPI)
 ├── project.yml                 # xcodegen spec
 └── AnnottyHIL.xcodeproj        # Xcode project
 ```

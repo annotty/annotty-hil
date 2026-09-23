@@ -1,7 +1,7 @@
 import Foundation
 
 /// API client for the Annotty HIL Server.
-/// Conforms to **protocol v1.0** as defined in `docs/protocol.md`.
+/// Conforms to **protocol v1** (currently 1.1) as defined in `protocol/protocol.md`.
 ///
 /// Single source of truth for the wire format is the protocol document — this
 /// client must follow it. If the server's behavior diverges, fix the server
@@ -18,13 +18,13 @@ actor HILServerClient {
 
     /// Update the base URL and API key (called when settings change)
     func updateSettings(baseURL: String, apiKey: String) {
-        self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.baseURL = Self.normalizeBaseURL(baseURL)
+        self.apiKey = Self.normalizeAPIKey(apiKey)
     }
 
     init(baseURL: String = "", apiKey: String = "") {
-        self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.baseURL = Self.normalizeBaseURL(baseURL)
+        self.apiKey = Self.normalizeAPIKey(apiKey)
         self.session = URLSession(configuration: .default)
         self.decoder = JSONDecoder()
         self.decoder.keyDecodingStrategy = .convertFromSnakeCase
@@ -161,9 +161,17 @@ actor HILServerClient {
         return info
     }
 
+    /// `POST /config` response. `warning` is set when the server accepted the
+    /// request but did not adopt the palette (e.g. required class name missing).
+    struct ConfigResponse: Codable {
+        let status: String?
+        let warning: String?
+    }
+
     /// Push the iPad-side palette / class names / class count to the server.
     /// Per spec §7.2 the client owns the palette; the server simply records it.
-    func postConfig(palette: [[Int]], classNames: [String], numClasses: Int) async throws {
+    @discardableResult
+    func postConfig(palette: [[Int]], classNames: [String], numClasses: Int) async throws -> ConfigResponse {
         struct ConfigPayload: Codable {
             let palette: [[Int]]
             let classNames: [String]
@@ -171,7 +179,10 @@ actor HILServerClient {
         }
         let body = try encoder.encode(ConfigPayload(
             palette: palette, classNames: classNames, numClasses: numClasses))
-        _ = try await post(path: "/config", body: body)
+        let data = try await post(path: "/config", body: body)
+        // Body shape beyond `status` is not essential; don't fail on it.
+        return (try? decoder.decode(ConfigResponse.self, from: data))
+            ?? ConfigResponse(status: nil, warning: nil)
     }
 
     /// Raw images listing for a single pool (`pending`, `submitted`, or `fixed`).
@@ -282,6 +293,19 @@ actor HILServerClient {
 
     // MARK: - Private Helpers
 
+    /// Pasted values often carry stray whitespace/newlines, which make the
+    /// server reject the key as invalid.
+    private static func normalizeAPIKey(_ key: String) -> String {
+        key.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Paths are appended as "/info" etc., so drop trailing slashes to avoid "//info".
+    private static func normalizeBaseURL(_ url: String) -> String {
+        var s = url.trimmingCharacters(in: .whitespacesAndNewlines)
+        while s.hasSuffix("/") { s.removeLast() }
+        return s
+    }
+
     private func makeURL(path: String) throws -> URL {
         guard !baseURL.isEmpty, let url = URL(string: baseURL + path) else {
             throw HILError.invalidURL
@@ -386,9 +410,36 @@ enum HILError: LocalizedError {
         case .maskConversionFailed:
             return "Failed to convert mask data"
         case .decodingError(let path, let underlying):
-            return "応答のデコードに失敗 (\(path)): \(underlying.localizedDescription)"
+            return "応答のデコードに失敗 (\(path)): \(Self.describeDecodingError(underlying))"
         case .protocolMismatch(let serverVersion, let clientMajor):
             return "プロトコル不一致 (server=\(serverVersion), client major=\(clientMajor)). サーバー更新が必要です"
+        }
+    }
+}
+
+extension HILError {
+    /// Turn a `DecodingError` into "which key / which type" so server-side
+    /// mismatches can be pinpointed from the on-screen message alone.
+    static func describeDecodingError(_ error: Error) -> String {
+        guard let decodingError = error as? DecodingError else {
+            return error.localizedDescription
+        }
+        func keyPath(_ path: [CodingKey]) -> String {
+            let joined = path.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }
+                .joined(separator: ".")
+            return joined.isEmpty ? "(root)" : joined
+        }
+        switch decodingError {
+        case .keyNotFound(let key, let ctx):
+            return "keyNotFound '\(key.stringValue)' at \(keyPath(ctx.codingPath))"
+        case .typeMismatch(let type, let ctx):
+            return "typeMismatch \(type) at \(keyPath(ctx.codingPath))"
+        case .valueNotFound(let type, let ctx):
+            return "valueNotFound \(type) at \(keyPath(ctx.codingPath))"
+        case .dataCorrupted(let ctx):
+            return "dataCorrupted at \(keyPath(ctx.codingPath)): \(ctx.debugDescription)"
+        @unknown default:
+            return error.localizedDescription
         }
     }
 }

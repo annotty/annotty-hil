@@ -51,7 +51,7 @@
 - サーバーとクライアントでフィールド名そのものが違うときは `CodingKeys` で明示マッピングが必要
 
 ### プロトコル仕様書を単一真実源に置く
-- iPad とサーバーのレスポンス形式が静かにドリフトする問題は、`docs/protocol.md` のような
+- iPad とサーバーのレスポンス形式が静かにドリフトする問題は、`protocol/protocol.md` のような
   仕様書を作って両側がそれに従う構造にすると防げる
 - バージョニングは `protocol_version: "MAJOR.MINOR"` のような文字列が良い。整数だと「破壊変更しか
   できず実運用で詰む」、セマバ的な major.minor.patch まで分けると過剰になりがち
@@ -61,7 +61,7 @@
 ### マスク形式の選択肢
 - **インデックス画像 PNG（1ch、画素値=クラスID）**: 軽量、クラス数増減に強い、Preview.app では真っ黒
 - **RGB PNG（3ch、palette 色で着色）**: 視認性最強、デバッグしやすい、palette を共有する必要あり
-- Annotty HIL では後者を採用（プロトコル v1.0、`docs/protocol.md` §5.1）。
+- Annotty HIL では後者を採用（プロトコル v1.0、`protocol/protocol.md` §5.1）。
   palette は iPad 側が真、`POST /config` でサーバーに伝える方式
 - アンチエイリアスや色補間が混入すると palette 逆引きが壊れるので、リサイズは必ず最近傍補間
 
@@ -96,3 +96,26 @@
   - 元画像 pixel → drawable pixel: `* currentScale`（matrix の scale）
   - drawable pixel → UIKit point: `/ contentScaleFactor`
   - したがって元画像 pixel → UIKit point は `* currentScale / contentScaleFactor`
+
+## HIL サーバー接続トラブルの切り分け
+- 401 "invalid or missing X-API-Key": クライアントはキーが空でなければ全リクエストに付ける。
+  原因はたいてい **値の空白・改行の混入**（iPad での貼り付け、サーバー側の `.env`/`$(cat key)` の末尾改行）。
+  → クライアントは trim 済み（2026-09-23）。サーバー側も strip 推奨
+- 「応答のデコードに失敗」: `/info` が通っても、次の `/images?pool=` で落ちることが多い。
+  `/info` の型一致だけで「互換あり」と判断しない。メッセージに keyNotFound/typeMismatch とキーのパスが出るので、それを見る
+- パレット: iPad のパレットは class1 = 赤 (255,0,0) で固定。接続時に `POST /config` で送る（2026-09-23 から）。
+  class_names / num_classes は `/info` の値をそのまま返し、色だけ iPad のものを番号で対応させる。
+  → 利用者にクラス名の設定をさせない（「名前を合わせないと動かない」設計は煩雑なので避ける）
+
+## LLM にサーバーを作らせるときの教訓
+- LLM は仕様書より、**リポジトリ内のコード・テスト・README を真似る**ことがある
+  （2026-09: 古い `server/scripts/test_api.py` の `{"images":[{"id":..}]}` が新サーバーにそのまま使われた）
+  → 仕様と食い違う古い参照コードは削除するか、「非準拠」と明記する
+- 文面だけだと LLM は形を「改善」してしまう。必須/型の表・禁止事項（§2.1）・**適合テスト**（`protocol/conformance_test.py`）で合否を判定させる
+- 仕様を変えたら、クライアント（`HILServerClient.swift` の Codable）と適合テストのスキーマを同時に更新する（3つを一致させる）
+
+## マスク送受信の落とし穴（参照サーバーで実際に起きたもの）
+- iPad の提出マスクは **RGBA**（`createColoredPNG` → `UIImage.pngData()`）。サーバーが RGBA を拒否すると提出できない → α は捨てて RGB として扱う
+- 「R=G=B なら旧形式のクラスID画像」とみなす分岐は危険。**真っ白（全部背景）のマスクがクラスID 255 と誤解釈**されて 400 になる
+- 保存形式をクラスIDにしておけば、通信用のパレットはいつ差し替えてもよい（パレット変更を 409 で禁止する必要がない）
+- `git push` の前に `git fetch` で、リモートに別の作業（別マシン・別セッション）が入っていないか確認する。今回は `server/` が丸ごと新しい実装に置き換わっていた
