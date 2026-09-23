@@ -1,8 +1,8 @@
-"""Inspect a directory of class-id PNG masks and propose a v1.0 client config.
+"""Inspect a directory of class-id PNG masks and propose the class definition.
 
 Useful when porting a new dataset whose class IDs are unknown: the script
-scans the masks, reports the unique IDs, and emits a JSON that can be fed
-into ``data/client_config.json`` (or POSTed to ``/config``).
+scans the masks, reports the unique IDs, and emits a JSON for
+``data/client_config.json`` (the server's class definition, protocol §5.2).
 
 Usage::
 
@@ -11,13 +11,12 @@ Usage::
         [--names background,iris,sclera,...]   # one per unique class id
 
 If ``--names`` is omitted the script prints stub names (``class_0``, ...).
-A reasonable default RGB palette is produced from a 12-step HSV wheel; you
-can edit the JSON before submission.
+The default palette is the iPad client palette (protocol §5.2); the client
+replaces it via ``POST /config`` anyway.
 """
 from __future__ import annotations
 
 import argparse
-import colorsys
 import json
 import sys
 from pathlib import Path
@@ -42,13 +41,17 @@ def _scan(directory: Path, sample_limit: int) -> set[int]:
     return seen
 
 
+# iPad client palette (protocol §5.2). Background is white.
+IPAD_PALETTE = [
+    [255, 255, 255], [255, 0, 0], [255, 128, 0], [255, 255, 0], [0, 255, 0],
+    [0, 255, 255], [0, 0, 255], [128, 0, 255], [255, 102, 178],
+]
+
+
 def _default_palette(n: int) -> list[list[int]]:
-    palette = [[0, 0, 0]]  # background reserved as black
-    for i in range(1, n):
-        h = ((i - 1) / max(n - 1, 1)) % 1.0
-        r, g, b = colorsys.hsv_to_rgb(h, 0.85, 0.95)
-        palette.append([int(r * 255), int(g * 255), int(b * 255)])
-    return palette
+    if n > len(IPAD_PALETTE):
+        raise SystemExit(f"{n} classes found; the iPad client supports at most {len(IPAD_PALETTE)}")
+    return [list(rgb) for rgb in IPAD_PALETTE[:n]]
 
 
 def main() -> int:

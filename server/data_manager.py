@@ -297,10 +297,9 @@ class DataManager:
         """Validate the mask payload and persist it to submitted/.
 
         Accepted wire formats (per protocol §5.1, plus fork legacy):
-          * RGB PNG with palette colours — reverse-looked up against
-            ``palette`` to recover class IDs (this is the v1.0 wire format).
+          * RGB or RGBA (alpha ignored) PNG with palette colours — reverse-looked
+            up against ``palette`` to recover class IDs (the v1 wire format).
           * Single-channel (mode=L) PNG with class IDs — legacy.
-          * 3-channel PNG with all channels equal — legacy class-id PNG.
 
         Behaviour by source pool:
           * pending   → physically move image to submitted/, drop seed,
@@ -311,8 +310,9 @@ class DataManager:
           * absent    → raises ImageNotFoundError.
 
         Raises ``ValueError`` on bad payload (empty body, undecodable PNG,
-        RGBA, RGB whose colours don't match the palette, or class id
-        ≥ ``num_classes``).
+        RGB whose colours don't match the palette, or class id
+        ≥ ``num_classes``). The alpha channel of an RGBA mask is ignored
+        (protocol §5.1).
         """
         self.validate(image_id)
         if not content:
@@ -329,13 +329,11 @@ class DataManager:
         arr = np.array(img)
         if arr.ndim == 3:
             if arr.shape[2] == 4:
-                raise ValueError("mask must not have an alpha channel (RGBA)")
-            if arr.shape[2] >= 3 and np.array_equal(arr[..., 0], arr[..., 1]) \
-               and np.array_equal(arr[..., 1], arr[..., 2]):
-                # Legacy form: 3 channels all equal — treat as single class-id channel.
-                arr = arr[..., 0]
-            elif arr.shape[2] == 3:
-                # v1.0 wire form: RGB palette PNG. Reverse-lookup colours.
+                arr = arr[..., :3]
+            if arr.shape[2] == 3:
+                # Wire form (protocol §5.1): RGB palette PNG. Reverse-lookup colours.
+                # (No "all channels equal = class-id" shortcut: an all-white
+                # mask is a valid all-background submission.)
                 if palette is None:
                     raise ValueError(
                         "RGB mask received but no palette configured "

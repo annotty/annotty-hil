@@ -1,10 +1,10 @@
-"""Annotty HIL Server — protocol v1.0 reference implementation.
+"""Annotty HIL Server — protocol v1.1 reference implementation.
 
-The server is **class-agnostic**: the iPad client (or a setup script)
-posts the palette / class_names / num_classes via ``POST /config``. The
-configuration is persisted to ``data/client_config.json`` so it survives
-restarts. Run ``scripts/init_periocular_config.py`` once to seed the
-periocular 7-class workflow.
+The class definition (``num_classes`` / ``class_names``) is owned by the
+server and read from ``data/client_config.json`` at startup; the server
+refuses to start without it. The palette in that file is only the default:
+``POST /config`` replaces it with the client's palette (protocol §5.2).
+Labels are stored as class-id PNGs, so the palette can change at any time.
 """
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ from version_manager import bump_version, latest_headers, model_info
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.1"
 SERVER_NAME = "Annotty HIL Server"
 DEFAULT_METRIC_NAME = "dice"
 
@@ -249,8 +249,12 @@ def run_training_task(max_epochs: int, num_classes: int) -> None:
 def load_persisted_config() -> None:
     cfg = load_client_config()
     if cfg is None:
-        logger.info("no persisted client_config; awaiting POST /config")
-        return
+        # Protocol §5.2: /info must return the class definition even before
+        # POST /config, so the server cannot run without one.
+        raise RuntimeError(
+            f"class definition missing: create {config.CLIENT_CONFIG_PATH} with "
+            '{"num_classes": N, "class_names": [...], "palette": [[255,255,255], ...]}'
+        )
     with config_lock:
         client_config["palette"] = cfg["palette"]
         client_config["class_names"] = cfg["class_names"]
@@ -305,28 +309,22 @@ def post_config(cfg: ClientConfig) -> dict:
                 detail="palette entries must be [R,G,B] with 0..255 integers",
             )
 
-    stats = dm.get_stats()
-    submitted_or_fixed = stats["submitted"] + stats["fixed"]
     with config_lock:
-        prev_palette = client_config["palette"]
+        # Protocol §7.2: the class definition is the server's; the client only
+        # echoes it back. The palette is adopted unconditionally (labels are
+        # stored as class ids, so no stored data depends on it).
         if (
-            prev_palette is not None
-            and prev_palette != cfg.palette
-            and submitted_or_fixed > 0
+            cfg.num_classes != client_config["num_classes"]
+            or cfg.class_names != client_config["class_names"]
         ):
             raise HTTPException(
                 status_code=409,
-                detail="palette change forbidden while submitted/fixed pools are non-empty",
+                detail="class_names / num_classes do not match GET /info",
             )
-        new_cfg = {
-            "palette": [list(rgb) for rgb in cfg.palette],
-            "class_names": list(cfg.class_names),
-            "num_classes": int(cfg.num_classes),
-        }
-        client_config.update(new_cfg)
-        save_client_config(new_cfg)
+        client_config["palette"] = [list(rgb) for rgb in cfg.palette]
+        save_client_config(client_config)
 
-    logger.info("client config updated: num_classes=%d", cfg.num_classes)
+    logger.info("palette updated by client: %s", cfg.palette)
     return {"status": "ok"}
 
 
@@ -362,13 +360,8 @@ def download_label(image_id: str):
     p = dm.get_label_path(image_id)
     if p is None:
         raise HTTPException(status_code=404, detail="label not found")
-    # Protocol §5.1 mandates RGB PNG on the wire. Storage is implementation
-    # detail: pending seeds (and fork-strict submitted masks) are stored as
-    # single-channel class-id PNGs. Normalise to RGB via palette before
-    # shipping. If the file is already RGB, FileResponse is sufficient.
-    with Image.open(p) as im:
-        if im.mode == "RGB":
-            return FileResponse(p, media_type="image/png", filename=p.name)
+    # Labels are stored as class-id PNGs (same reading as dataset.py);
+    # render them with the current palette for the wire (protocol §5.1).
     palette = require_palette()
     png_bytes = render_class_id_png_to_rgb(class_id_path=p, palette=palette)
     return Response(content=png_bytes, media_type="image/png")
