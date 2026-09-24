@@ -12,6 +12,17 @@ struct ServerSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    PasteButton(payloadType: String.self) { strings in
+                        guard let text = strings.first else { return }
+                        Task { @MainActor in applyConnection(text) }
+                    }
+                } header: {
+                    Text("かんたん接続")
+                } footer: {
+                    Text("サーバーが表示するキー付きURL（例: https://xxxx.trycloudflare.com/web/?key=...）を貼り付けると、URLとAPIキーを自動で入力して接続テストします。")
+                }
+
                 Section("HIL Server") {
                     Toggle("Enable HIL", isOn: $settings.isEnabled)
 
@@ -20,6 +31,10 @@ struct ServerSettingsView: View {
                             .keyboardType(.URL)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .onChange(of: settings.serverURL) { _, newValue in
+                                // A key-bearing URL typed/pasted here is split automatically
+                                if newValue.contains("key=") { applyConnection(newValue) }
+                            }
 
                         SecureField("API Key", text: $settings.apiKey)
                             .textInputAutocapitalization(.never)
@@ -63,6 +78,15 @@ struct ServerSettingsView: View {
                     Button("Done") { dismiss() }
                 }
             }
+        }
+    }
+
+    /// Split a connection URL into server URL + API key, then test right away
+    private func applyConnection(_ text: String) {
+        if settings.applyConnectionURL(text) {
+            testConnection()
+        } else {
+            testResult = "Error: キー付きURLではありません（?key=... が見つかりません）"
         }
     }
 

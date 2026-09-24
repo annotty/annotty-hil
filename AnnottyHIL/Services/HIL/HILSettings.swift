@@ -12,6 +12,31 @@ class HILSettings: ObservableObject {
         !serverURL.isEmpty && isEnabled
     }
 
+    /// Query parameter names accepted as the API key in a connection URL
+    private static let keyQueryNames: Set<String> = ["key", "api_key", "apikey"]
+
+    /// Fill `serverURL` / `apiKey` from a connection URL such as
+    /// `https://host.trycloudflare.com/web/?key=XXXX` (pasted or scanned from a QR code).
+    /// The API base is the origin only: the path (e.g. `/web/`) belongs to the
+    /// server's browser page, not the API. Returns false if no key is found.
+    @discardableResult
+    func applyConnectionURL(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let components = URLComponents(string: trimmed),
+              let scheme = components.scheme, let host = components.host,
+              let key = components.queryItems?.first(where: {
+                  Self.keyQueryNames.contains($0.name.lowercased())
+              })?.value, !key.isEmpty
+        else { return false }
+
+        var origin = "\(scheme)://\(host)"
+        if let port = components.port { origin += ":\(port)" }
+        serverURL = origin
+        apiKey = key
+        isEnabled = true
+        return true
+    }
+
     private var cancellables = Set<AnyCancellable>()
 
     init() {
